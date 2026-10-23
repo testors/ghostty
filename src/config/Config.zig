@@ -29,6 +29,7 @@ const file_load = @import("file_load.zig");
 const formatterpkg = @import("formatter.zig");
 const themepkg = @import("theme.zig");
 const url = @import("url.zig");
+pub const Trace = @import("Trace.zig");
 pub const Key = @import("key.zig").Key;
 const MetricModifier = fontpkg.Metrics.Modifier;
 const help_strings = @import("help_strings");
@@ -4038,6 +4039,12 @@ _replay_steps: std.ArrayList(Replay.Step) = .empty,
 /// Set to true if Ghostty was executed as xdg-terminal-exec on Linux.
 @"_xdg-terminal-exec": bool = false,
 
+/// If set, every configuration entry parsed from a file or the CLI is
+/// recorded here along with its location. This is used by the settings
+/// editor and is not owned by the configuration. Replays (themes,
+/// conditional state changes) are not recorded.
+_trace: ?*Trace = null,
+
 pub fn deinit(self: *Config) void {
     if (self._arena) |arena| arena.deinit();
     self.* = undefined;
@@ -4373,6 +4380,7 @@ pub fn loadCliArgs(self: *Config, alloc_gpa: Allocator) !void {
     // Keep track of the replay steps up to this point so we
     // can replay if we are discarding the default files.
     const replay_len_start = self._replay_steps.items.len;
+    const trace_len_start = if (self._trace) |t| t.entries.items.len else 0;
 
     // font-family settings set via the CLI overwrite any prior values
     // rather than append. This avoids a UX oddity where you have to
@@ -4408,8 +4416,14 @@ pub fn loadCliArgs(self: *Config, alloc_gpa: Allocator) !void {
             &new_config,
         );
         try new_config.loadIter(alloc_gpa, &it);
+
+        // The trace isn't part of the replay so keep it but drop the
+        // entries that came from the discarded default files.
+        const trace = self._trace;
+        if (trace) |t| t.discardBefore(trace_len_start);
         self.deinit();
         self.* = new_config;
+        self._trace = trace;
     }
 
     // Any paths referenced from the CLI are relative to the current working
@@ -5010,6 +5024,12 @@ pub fn parseManuallyHook(
         alloc,
         .{ .arg = try alloc.dupeSentinel(u8, arg, 0) },
     );
+
+    // Record where this entry came from if tracing is enabled.
+    if (self._trace) |trace| {
+        const location = try cli.Location.fromIter(iter, alloc);
+        try trace.record(arg, location);
+    }
 
     // If we didn't find a special case, continue parsing normally
     return true;

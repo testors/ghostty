@@ -1159,6 +1159,52 @@ GHOSTTY_API uint32_t ghostty_config_diagnostics_count(ghostty_config_t);
 GHOSTTY_API ghostty_diagnostic_s ghostty_config_get_diagnostic(ghostty_config_t, uint32_t);
 GHOSTTY_API ghostty_string_s ghostty_config_open_path(void);
 
+// Settings editor. Functions returning ghostty_string_s return an empty
+// string on success or an error message. Free the result with
+// ghostty_string_free.
+typedef void* ghostty_config_editor_t;
+GHOSTTY_API ghostty_string_s ghostty_config_schema_json(void);
+GHOSTTY_API ghostty_string_s ghostty_config_themes_json(void);
+GHOSTTY_API ghostty_string_s ghostty_config_keybind_actions_json(void);
+GHOSTTY_API ghostty_config_editor_t ghostty_config_editor_new(const char*,
+                                                              bool,
+                                                              bool);
+GHOSTTY_API void ghostty_config_editor_free(ghostty_config_editor_t);
+GHOSTTY_API ghostty_string_s ghostty_config_editor_reload(ghostty_config_editor_t);
+GHOSTTY_API ghostty_string_s ghostty_config_editor_set_dark(ghostty_config_editor_t,
+                                                            bool);
+GHOSTTY_API ghostty_string_s ghostty_config_editor_snapshot_json(
+    ghostty_config_editor_t);
+GHOSTTY_API ghostty_string_s ghostty_config_editor_validate(ghostty_config_editor_t,
+                                                            const char*,
+                                                            const char*);
+GHOSTTY_API ghostty_string_s ghostty_config_editor_set(ghostty_config_editor_t,
+                                                       const char*,
+                                                       const char*);
+GHOSTTY_API ghostty_string_s ghostty_config_editor_set_list(ghostty_config_editor_t,
+                                                            const char*,
+                                                            const char* const*,
+                                                            uintptr_t);
+GHOSTTY_API ghostty_string_s ghostty_config_editor_add(ghostty_config_editor_t,
+                                                       const char*,
+                                                       const char*);
+GHOSTTY_API ghostty_string_s ghostty_config_editor_replace_entry(
+    ghostty_config_editor_t,
+    const char*,
+    const char*,
+    uintptr_t,
+    const char*);
+GHOSTTY_API ghostty_string_s ghostty_config_editor_remove_entry(
+    ghostty_config_editor_t,
+    const char*,
+    const char*,
+    uintptr_t);
+GHOSTTY_API ghostty_string_s ghostty_config_editor_reset(ghostty_config_editor_t,
+                                                         const char*);
+GHOSTTY_API ghostty_config_t ghostty_config_editor_preview(ghostty_config_editor_t,
+                                                           const char*,
+                                                           const char*);
+
 GHOSTTY_API ghostty_app_t ghostty_app_new(const ghostty_runtime_config_s*,
                                              ghostty_config_t);
 GHOSTTY_API void ghostty_app_free(ghostty_app_t);
