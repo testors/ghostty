@@ -144,7 +144,7 @@ struct ThemePickerSheet: View {
     let current: String
 
     @Environment(\.dismiss) private var dismiss
-    @State private var filter: Filter = .all
+    @State private var filter: Filter
     @State private var search = ""
     @State private var selected: String?
     @State private var livePreview = true
@@ -152,6 +152,27 @@ struct ThemePickerSheet: View {
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", dark = "Dark", light = "Light"
         var id: String { rawValue }
+    }
+
+    init(store: SettingsStore, slot: ThemeSlot, current: String) {
+        self.store = store
+        self.slot = slot
+        self.current = current
+
+        // The selection is set here and not in onAppear: the grid scrolls
+        // to it in its own onAppear, which runs before the sheet's.
+        let theme = current.isEmpty ? nil : ThemeValue(current)
+        switch slot {
+        case .single:
+            _filter = State(initialValue: .all)
+            _selected = State(initialValue: theme?.light)
+        case .light:
+            _filter = State(initialValue: .light)
+            _selected = State(initialValue: theme?.light)
+        case .dark:
+            _filter = State(initialValue: .dark)
+            _selected = State(initialValue: theme?.dark)
+        }
     }
 
     private var currentTheme: ThemeValue? {
@@ -266,19 +287,7 @@ struct ThemePickerSheet: View {
             .padding(16)
         }
         .frame(width: 760, height: 600)
-        .onAppear {
-            store.loadThemes()
-            switch slot {
-            case .light:
-                filter = .light
-                selected = currentTheme?.light
-            case .dark:
-                filter = .dark
-                selected = currentTheme?.dark
-            case .single:
-                selected = currentTheme?.light
-            }
-        }
+        .onAppear { store.loadThemes() }
     }
 
     private func scrollToSelection(_ proxy: ScrollViewProxy) {
