@@ -515,17 +515,24 @@ language: ?[:0]const u8 = null,
 /// terminals. Only new terminals will use the new configuration.
 @"grapheme-width-method": GraphemeWidthMethod = .unicode,
 
-/// Normalize Unicode text to NFC (Normalization Form C) before storing it
-/// in the terminal grid.
+/// Compose decomposed Unicode sequences into their precomposed (NFC)
+/// form as text is written to the terminal grid.
 ///
 /// macOS stores filenames in NFD (decomposed) form. For Hangul this means
-/// each syllable is represented as conjoining jamo, which many fonts
-/// (including D2Coding) do not contain. Normalizing to NFC lets the
-/// configured font render the text instead of falling back to a system
-/// font.
+/// each syllable arrives as conjoining jamo, and accented Latin letters
+/// arrive as a base letter plus a combining mark. Many fonts (including
+/// D2Coding) only contain the precomposed codepoints, so without this the
+/// terminal falls back to a different font for every such character.
+///
+/// Composition happens as each codepoint is attached to a cell, so it does
+/// not depend on how a program's output is split into writes. Only
+/// sequences are affected: a standalone codepoint is never rewritten, so
+/// characters that full NFC would replace with a different codepoint, such
+/// as CJK compatibility ideographs, keep their original codepoint.
 ///
 /// This changes the text stored in the terminal, so copying text will
-/// produce NFC. Set this to `false` to preserve the original codepoints.
+/// produce the composed form. Set this to `false` to preserve the original
+/// codepoints.
 ///
 /// This configuration can be changed at runtime but will not affect
 /// existing terminals. Only new terminals will use the new configuration.

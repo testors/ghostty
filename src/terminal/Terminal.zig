@@ -83,7 +83,8 @@ previous_char: ?u21 = null,
 /// The modes that this terminal currently has active.
 modes: modespkg.ModeState = .{},
 
-/// Whether to normalize printed text to NFC before storing it.
+/// Whether to compose decomposed sequences (e.g. NFD Hangul jamo) into
+/// their precomposed codepoint as they are printed. See unicode/nfc.zig.
 normalize_output_nfc: bool = true,
 
 /// Terminal-level cursor state.
@@ -300,7 +301,8 @@ pub const Options = struct {
     /// will revert back to this state.
     default_modes: modespkg.ModePacked = .{},
 
-    /// Whether to normalize printed text to NFC before storing it.
+    /// Whether to compose decomposed sequences (e.g. NFD Hangul jamo) into
+    /// their precomposed codepoint as they are printed. See unicode/nfc.zig.
     normalize_output_nfc: bool = true,
 
     /// Cursor state restored by DECSCUSR default, RIS and DECSTR.
@@ -541,22 +543,7 @@ pub fn setScrollbackMaxLines(self: *Terminal, max: ?usize) void {
 pub fn printString(self: *Terminal, str: []const u8) !void {
     const view = try std.unicode.Utf8View.init(str);
     var it = view.iterator();
-
-    // Collect the codepoints so we can normalize the whole string. This
-    // is not a hot path; the PTY path goes through printSlice.
-    var cps: std.ArrayListUnmanaged(u21) = .empty;
-    defer cps.deinit(self.gpa());
-    while (it.nextCodepoint()) |cp| try cps.append(self.gpa(), cp);
-
-    var normalized_buf: ?[]u21 = null;
-    defer if (normalized_buf) |buf| self.gpa().free(buf);
-    const final: []const u21 = if (self.normalize_output_nfc and needsNfc(cps.items)) blk: {
-        const buf = try unicode.nfc.normalize(self.gpa(), cps.items);
-        normalized_buf = buf;
-        break :blk buf;
-    } else cps.items;
-
-    for (final) |cp| {
+    while (it.nextCodepoint()) |cp| {
         switch (cp) {
             '\n' => {
                 self.carriageReturn();
@@ -608,17 +595,7 @@ pub fn printRepeat(self: *Terminal, count_req: usize) !void {
 /// grapheme clustering) are handled correctly but fall back to the
 /// slower per-codepoint path. They're less common and this is optimized
 /// for the aforementioned cases.
-pub fn printSlice(self: *Terminal, cps_in: []const u32) !void {
-    // Normalize to NFC if enabled. ASCII is already NFC, so skip the
-    // common case entirely.
-    var normalized_buf: ?[]u32 = null;
-    defer if (normalized_buf) |buf| self.gpa().free(buf);
-    const cps: []const u32 = if (self.normalize_output_nfc and needsNfc(cps_in)) blk: {
-        const buf = try unicode.nfc.normalizeU32(self.gpa(), cps_in);
-        normalized_buf = buf;
-        break :blk buf;
-    } else cps_in;
-
+pub fn printSlice(self: *Terminal, cps: []const u32) !void {
     // Check if we can do the fast path up front. If we can't
     // we need to go back to scalar `print`.
     const fast = fast: {
@@ -682,13 +659,30 @@ pub fn printSlice(self: *Terminal, cps_in: []const u32) !void {
     }
 }
 
-/// Returns true if the codepoint slice contains any non-ASCII codepoint
-/// and therefore may need NFC normalization.
-fn needsNfc(cps: anytype) bool {
-    for (cps) |cp| {
-        if (cp >= 0x80) return true;
+/// Compose `c` with the single codepoint stored in `cell`, replacing the
+/// cell's codepoint with the precomposed form. Returns false if the pair
+/// does not compose, in which case the caller attaches `c` as grapheme
+/// data as usual.
+///
+/// The cell must be on the cursor row and must not have grapheme data.
+/// The composite replaces the codepoint in place, so the cursor position
+/// and the cell's wide state are unaffected.
+fn composeIntoCell(self: *Terminal, cell: *Cell, c: u21) bool {
+    assert(!cell.hasGrapheme());
+    const prev_cp = cell.content.codepoint.data;
+    const composite = unicode.nfc.compose(prev_cp, c) orelse return false;
+
+    // Canonical equivalents share a width, but the cell's wide state has
+    // to stay consistent with the stored codepoint, so verify rather
+    // than assume.
+    if (unicode.table.get(composite).width != unicode.table.get(prev_cp).width) {
+        return false;
     }
-    return false;
+
+    cell.content.codepoint.data = composite;
+    self.previous_char = composite;
+    self.screens.active.cursorMarkDirty();
+    return true;
 }
 
 /// Attempt to print a prefix of `cps` using a batched fast path that
@@ -1402,6 +1396,14 @@ pub fn print(self: *Terminal, c: u21) !void {
         // If we can NOT break, this means that "c" is part of a grapheme
         // with the previous char.
         if (!grapheme_break) {
+            // Compose decomposed sequences (NFD Hangul jamo, base letter
+            // plus combining mark) into their precomposed codepoint so
+            // font selection sees a codepoint the configured font has.
+            // See unicode/nfc.zig for the rationale and limits.
+            if (self.normalize_output_nfc and !prev.cell.hasGrapheme()) {
+                if (self.composeIntoCell(prev.cell, c)) return;
+            }
+
             switch (unicode.graphemeWidthEffect(previous_codepoint, c)) {
                 .ignore => return,
                 .wide => wide: {
@@ -1575,6 +1577,12 @@ pub fn print(self: *Terminal, c: u21) !void {
             const prev_props = unicode.table.get(prev.content.codepoint.data);
             const emoji = prev_props.grapheme_break == .extended_pictographic;
             if (!emoji) return;
+        }
+
+        // Compose decomposed sequences into their precomposed codepoint,
+        // same as the mode 2027 path above.
+        if (self.normalize_output_nfc and !prev.hasGrapheme()) {
+            if (self.composeIntoCell(prev, c)) return;
         }
 
         try self.screens.active.appendGrapheme(prev, c);
@@ -5516,22 +5524,105 @@ test "Terminal: print wide char" {
     try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
 }
 
-test "Terminal: printSlice normalizes NFD Hangul to NFC" {
+test "Terminal: print composes NFD Hangul to NFC" {
     var t = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
+    t.modes.set(.grapheme_cluster, true);
 
     // 무제 in NFD.
-    const nfd = [_]u32{ 0x1106, 0x116E, 0x110C, 0x1166 };
-    try t.printSlice(&nfd);
+    try t.printSlice(&[_]u32{ 0x1106, 0x116E, 0x110C, 0x1166 });
 
     {
         const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
         try testing.expectEqual(@as(u21, 0xBB34), list_cell.cell.content.codepoint.data);
+        try testing.expect(!list_cell.cell.hasGrapheme());
+        try testing.expect(list_cell.cell.wide == .wide);
     }
     {
         const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 2, .y = 0 } }).?;
         try testing.expectEqual(@as(u21, 0xC81C), list_cell.cell.content.codepoint.data);
+        try testing.expect(!list_cell.cell.hasGrapheme());
+        try testing.expect(list_cell.cell.wide == .wide);
     }
+    try testing.expectEqual(@as(usize, 4), t.screens.active.cursor.x);
+}
+
+test "Terminal: print composes NFD Hangul split across print calls" {
+    var t = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 80 });
+    defer t.deinit(testing.allocator);
+    t.modes.set(.grapheme_cluster, true);
+
+    // 문 (LVT) with the leading consonant arriving on its own, as happens
+    // when a PTY read boundary falls inside a jamo sequence.
+    try t.print(0x1106);
+    try t.printSlice(&[_]u32{ 0x116E, 0x11AB });
+
+    const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
+    try testing.expectEqual(@as(u21, 0xBB38), list_cell.cell.content.codepoint.data);
+    try testing.expect(!list_cell.cell.hasGrapheme());
+    try testing.expect(list_cell.cell.wide == .wide);
+    try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.x);
+}
+
+test "Terminal: print composes NFD Hangul with mode 2027 disabled" {
+    var t = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 80 });
+    defer t.deinit(testing.allocator);
+    t.modes.set(.grapheme_cluster, false);
+
+    // 문 in NFD.
+    try t.printSlice(&[_]u32{ 0x1106, 0x116E, 0x11AB });
+
+    const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
+    try testing.expectEqual(@as(u21, 0xBB38), list_cell.cell.content.codepoint.data);
+    try testing.expect(!list_cell.cell.hasGrapheme());
+    try testing.expect(list_cell.cell.wide == .wide);
+    try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.x);
+}
+
+test "Terminal: print keeps NFD Hangul when composition is disabled" {
+    var t = try init(testing.io, testing.allocator, .{
+        .cols = 80,
+        .rows = 80,
+        .normalize_output_nfc = false,
+    });
+    defer t.deinit(testing.allocator);
+    t.modes.set(.grapheme_cluster, true);
+
+    try t.printSlice(&[_]u32{ 0x1106, 0x116E });
+
+    const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
+    try testing.expectEqual(@as(u21, 0x1106), list_cell.cell.content.codepoint.data);
+    try testing.expect(list_cell.cell.hasGrapheme());
+    const cps = list_cell.node.page().lookupGrapheme(list_cell.cell).?;
+    try testing.expectEqualSlices(u21, &.{0x116E}, cps);
+}
+
+test "Terminal: print composes combining mark into precomposed letter" {
+    var t = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 80 });
+    defer t.deinit(testing.allocator);
+    t.modes.set(.grapheme_cluster, true);
+
+    // e + combining acute -> é
+    try t.printSlice(&[_]u32{ 'e', 0x0301 });
+
+    const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
+    try testing.expectEqual(@as(u21, 0x00E9), list_cell.cell.content.codepoint.data);
+    try testing.expect(!list_cell.cell.hasGrapheme());
+    try testing.expect(list_cell.cell.wide == .narrow);
+    try testing.expectEqual(@as(usize, 1), t.screens.active.cursor.x);
+}
+
+test "Terminal: printRepeat repeats the composed character" {
+    var t = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 80 });
+    defer t.deinit(testing.allocator);
+    t.modes.set(.grapheme_cluster, true);
+
+    try t.printSlice(&[_]u32{ 'e', 0x0301 });
+    try t.printRepeat(1);
+
+    const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 1, .y = 0 } }).?;
+    try testing.expectEqual(@as(u21, 0x00E9), list_cell.cell.content.codepoint.data);
+    try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.x);
 }
 
 test "Terminal: print wide char at edge creates spacer head" {
@@ -6669,7 +6760,13 @@ test "Terminal: grapheme transfer when widening wraps below the scroll region" {
 test "Terminal: grapheme transfer when widening scrolls a single row" {
     for ([_]bool{ false, true }) |alternate| {
         for ([_]bool{ false, true }) |margins| {
-            var t = try init(testing.io, testing.allocator, .{ .rows = 1, .cols = 5 });
+            // This test inspects the raw combining mark, so keep it from
+            // being composed into a precomposed letter.
+            var t = try init(testing.io, testing.allocator, .{
+                .rows = 1,
+                .cols = 5,
+                .normalize_output_nfc = false,
+            });
             defer t.deinit(testing.allocator);
 
             t.modes.set(.grapheme_cluster, true);
@@ -6923,7 +7020,13 @@ test "Terminal: print invalid VS16 with second char" {
 }
 
 test "Terminal: print grapheme ò (o with nonspacing mark) should be narrow" {
-    var t = try init(testing.io, testing.allocator, .{ .rows = 5, .cols = 5 });
+    // This test inspects the raw combining mark, so keep it from
+    // being composed into a precomposed letter.
+    var t = try init(testing.io, testing.allocator, .{
+        .rows = 5,
+        .cols = 5,
+        .normalize_output_nfc = false,
+    });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -7090,7 +7193,13 @@ test "Terminal: print Devanagari grapheme should be wide on next page" {
 }
 
 test "Terminal: print invalid VS16 with second char (combining)" {
-    var t = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 80 });
+    // This test inspects the raw combining mark, so keep it from
+    // being composed into a precomposed letter.
+    var t = try init(testing.io, testing.allocator, .{
+        .cols = 80,
+        .rows = 80,
+        .normalize_output_nfc = false,
+    });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -15076,16 +15185,11 @@ fn testPrintSliceDifferential(
     var t1 = try init(io_impl, alloc, .{
         .cols = cols,
         .rows = rows,
-        // This test compares printSlice against per-codepoint print, so
-        // disable NFC normalization: normalization intentionally makes
-        // the two paths differ for non-NFC input.
-        .normalize_output_nfc = false,
     });
     defer t1.deinit(alloc);
     var t2 = try init(io_impl, alloc, .{
         .cols = cols,
         .rows = rows,
-        .normalize_output_nfc = false,
     });
     defer t2.deinit(alloc);
 
