@@ -460,9 +460,15 @@ test "ghostty_config_trigger: default keybind" {
 
     // Default commands should be fetchable through config_trigger_
     {
+        const trigger = try config_trigger_(&cfg, "open_settings");
+        try testing.expectEqual(.unicode, trigger.tag);
+        try testing.expectEqual(@as(u32, ','), trigger.key.unicode);
+    }
+    {
         const trigger = try config_trigger_(&cfg, "open_config");
         try testing.expectEqual(.unicode, trigger.tag);
         try testing.expectEqual(@as(u32, ','), trigger.key.unicode);
+        try testing.expect(trigger.mods.alt);
     }
     {
         const trigger = try config_trigger_(&cfg, "reload_config");

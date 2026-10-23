@@ -43,6 +43,7 @@ const Window = @import("window.zig").Window;
 const Tab = @import("tab.zig").Tab;
 const CloseConfirmationDialog = @import("close_confirmation_dialog.zig").CloseConfirmationDialog;
 const ConfigErrorsDialog = @import("config_errors_dialog.zig").ConfigErrorsDialog;
+const SettingsDialog = @import("settings_dialog.zig").SettingsDialog;
 const GlobalShortcuts = @import("global_shortcuts.zig").GlobalShortcuts;
 const OpenURI = @import("../portal.zig").OpenURI;
 const media = @import("../media.zig");
@@ -213,6 +214,9 @@ pub const Application = extern struct {
         /// This is a WeakRef because the dialog can close on its own
         /// outside of our own lifecycle and that's okay.
         config_errors_dialog: WeakRef(ConfigErrorsDialog) = .empty,
+
+        /// The settings dialog if it is open.
+        settings_dialog: WeakRef(SettingsDialog) = .empty,
 
         /// glib source for our signal handler.
         signal_source: ?c_uint = null,
@@ -748,6 +752,8 @@ pub const Application = extern struct {
 
             .open_config => return Action.openConfig(self, value),
 
+            .open_settings => return Action.openSettings(self),
+
             .open_url => Action.openUrl(self, value),
 
             .pwd => Action.pwd(target, value),
@@ -1173,6 +1179,7 @@ pub const Application = extern struct {
         self.syncActionAccelerator("app.open-config::os-open", .{ .open_config = .os_open });
         self.syncActionAccelerator("app.open-config::new-window", .{ .open_config = .new_window });
         self.syncActionAccelerator("app.reload-config", .{ .reload_config = {} });
+        self.syncActionAccelerator("app.open-settings", .{ .open_settings = {} });
         self.syncActionAccelerator("win.toggle-inspector", .{ .inspector = .toggle });
         self.syncActionAccelerator("app.show-gtk-inspector", .show_gtk_inspector);
         self.syncActionAccelerator("win.toggle-command-palette", .toggle_command_palette);
@@ -1461,6 +1468,7 @@ pub const Application = extern struct {
             .init("present-surface", actionPresentSurface, t_variant_type),
             .init("quit", actionQuit, null),
             .init("reload-config", actionReloadConfig, null),
+            .init("open-settings", actionOpenSettings, null),
             .init("toggle-quick-terminal", actionToggleQuickTerminal, null),
             .init("ring-bell", actionRingBell, null),
         };
@@ -1759,6 +1767,25 @@ pub const Application = extern struct {
         const priv = self.private();
         priv.core_app.performAction(self.rt(), .reload_config) catch |err| {
             log.warn("error reloading config err={}", .{err});
+        };
+    }
+
+    fn actionOpenSettings(
+        _: *gio.SimpleAction,
+        _: ?*glib.Variant,
+        self: *Self,
+    ) callconv(.c) void {
+        _ = Action.openSettings(self);
+    }
+
+    /// The settings dialog wrote a change; apply it.
+    fn handleSettingsChanged(
+        _: *SettingsDialog,
+        self: *Self,
+    ) callconv(.c) void {
+        const priv = self.private();
+        priv.core_app.performAction(self.rt(), .reload_config) catch |err| {
+            log.warn("error reloading config after settings change err={}", .{err});
         };
     }
 
@@ -2613,6 +2640,33 @@ const Action = struct {
 
         // Show the window
         gtk.Window.present(win.as(gtk.Window));
+    }
+
+    pub fn openSettings(self: *Application) bool {
+        const priv = self.private();
+        const parent: ?*gtk.Widget = if (self.as(gtk.Application).getActiveWindow()) |win|
+            win.as(gtk.Widget)
+        else
+            null;
+
+        // Bring an open dialog forward instead of opening another.
+        if (priv.settings_dialog.get()) |dialog| {
+            defer dialog.unref(); // get gets a strong ref
+            dialog.present(parent);
+            return true;
+        }
+
+        const dialog: *SettingsDialog = .new();
+        priv.settings_dialog.set(dialog);
+        _ = SettingsDialog.signals.changed.connect(
+            dialog,
+            *Application,
+            Application.handleSettingsChanged,
+            self,
+            .{},
+        );
+        dialog.present(parent);
+        return true;
     }
 
     pub fn openConfig(self: *Application, value: apprt.action.OpenConfig) bool {

@@ -6681,6 +6681,11 @@ pub const Keybinds = struct {
         try self.set.put(
             alloc,
             .{ .key = .{ .unicode = ',' }, .mods = inputpkg.ctrlOrSuper(.{}) },
+            .{ .open_settings = {} },
+        );
+        try self.set.put(
+            alloc,
+            .{ .key = .{ .unicode = ',' }, .mods = inputpkg.ctrlOrSuper(.{ .alt = true }) },
             .{ .open_config = .default },
         );
 
