@@ -43,7 +43,7 @@ extension Ghostty.Action {
 
     struct OpenURL {
         /// Where the URL came from. `unknown` and `osc8` may come from
-        /// terminal output and must be opened through ``UntrustedURL``.
+        /// terminal output and must be checked before opening or revealing.
         enum Kind {
             /// May be a plain path, such as `~/notes.txt`, instead of a URL.
             case unknown

@@ -820,6 +820,20 @@ extension Ghostty {
                 return openUntrustedURL(action.url)
             }
 
+            if action.kind == .unknown {
+                if let url = URL(string: action.url), url.scheme != nil {
+                    return openUntrustedURL(action.url)
+                }
+
+                if let path = FinderPath(action.url) {
+                    NSWorkspace.shared.activateFileViewerSelecting([path.url])
+                }
+
+                // Missing or unresolved paths are handled too, so the core
+                // cannot retry them with the generic opener.
+                return true
+            }
+
             // If the URL doesn't have a valid scheme we assume its a file path. The URL
             // initializer will gladly take invalid URLs (e.g. plain file paths) and turn
             // them into schema-less URLs, but these won't open properly in text editors.
@@ -832,18 +846,6 @@ extension Ghostty {
                 // like ~/Documents/file.txt resolve correctly.
                 let expandedPath = NSString(string: action.url).standardizingPath
                 url = URL(filePath: expandedPath)
-            }
-
-            // Unknown URLs are as untrusted as OSC 8 but may be plain paths,
-            // which UntrustedURL rejects, so check the file URL built above.
-            // Values with unsafe characters are passed unchanged so they are
-            // rejected before percent-encoding hides them.
-            if action.kind == .unknown {
-                let hasScheme = URL(string: action.url)?.scheme != nil
-                let target = hasScheme || UntrustedURL.containsUnsafeCharacters(action.url)
-                    ? action.url
-                    : url.absoluteString
-                return openUntrustedURL(target)
             }
 
             switch action.kind {
@@ -860,7 +862,7 @@ extension Ghostty {
                 break
 
             case .osc8, .unknown:
-                assertionFailure("Untrusted URLs must use the safe-opening policy")
+                assertionFailure("Terminal links must be handled before the generic opener")
                 return true
             }
 
