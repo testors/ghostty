@@ -147,6 +147,11 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         /// shaders to update their state.
         custom_shader_focused_changed: bool = false,
 
+        /// True if the last frame update had preedit (IME composition)
+        /// text. The cursor is always a block during preedit, so this
+        /// feeds into `cursorBlinkable`.
+        has_preedit: bool = false,
+
         /// The most recent scrollbar state. We use this as a cache to
         /// determine if we need to notify the apprt that there was a
         /// scrollbar change.
@@ -185,6 +190,24 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         /// matters when the images change but no cell does, for example
         /// when a program places an image.
         images_rebuilt: bool = false,
+
+        /// Set when the uniforms change without a cell rebuild, such as
+        /// for a cursor blink. Like `cells_rebuilt`, this means the next
+        /// frame must be drawn.
+        uniforms_changed: bool = false,
+
+        /// Incremented every time the cells are rebuilt. Each frame
+        /// records the value it last uploaded, so draws that don't
+        /// rebuild cells (a cursor blink, a custom shader animation
+        /// frame) don't upload them again. This starts at 1 so that new
+        /// frames, which start at 0, always upload.
+        cells_modified: usize = 1,
+
+        /// The blink phase of the cursor as last set by the renderer
+        /// thread. The cells are always built with the cursor shown, and
+        /// the hidden phase is applied by the `cursor_blink_visible`
+        /// uniform so that a blink doesn't rebuild or upload any cells.
+        cursor_blink_visible: bool = true,
 
         /// The current GPU uniform values.
         uniforms: shaderpkg.Uniforms,
@@ -367,6 +390,13 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             uniforms: UniformBuffer,
             cells: CellTextBuffer,
             cells_bg: CellBgBuffer,
+
+            /// The renderer's `cells_modified` when `cells` and
+            /// `cells_bg` were last synced.
+            cells_modified: usize = 0,
+
+            /// The number of text cells in `cells` as of the last sync.
+            fg_count: usize = 0,
 
             grayscale: if (managed_atlas) void else Texture,
             grayscale_modified: usize = 0,
@@ -783,6 +813,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                         .use_display_p3 = options.config.colorspace == .@"display-p3",
                         .use_linear_blending = options.config.blending.isLinear(),
                         .use_linear_correction = options.config.blending == .@"linear-corrected",
+                        .cursor_blink_visible = true,
                     },
                 },
                 .custom_shader_uniforms = .{
@@ -1204,6 +1235,53 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             self.syncDisplayLink(null, null);
         }
 
+        /// Returns true if the cursor blink timer can change what is
+        /// drawn: the cursor is in the viewport, visible, focused,
+        /// blinking, and not in preedit or password input. When false,
+        /// a blink tick doesn't need to wake the renderer or draw.
+        ///
+        /// Must be called on the render thread.
+        pub fn cursorBlinkable(self: *const Self) bool {
+            return renderer.cursorBlinkable(&self.terminal_state, .{
+                .preedit = self.has_preedit,
+                .focused = self.focused,
+            });
+        }
+
+        /// Set the blink phase of the cursor. This only updates a
+        /// uniform: the cells always contain the cursor, so a blink
+        /// never rebuilds or uploads them. The caller must draw after.
+        ///
+        /// Must be called on the render thread.
+        pub fn setCursorBlinkVisible(self: *Self, visible: bool) void {
+            {
+                self.draw_mutex.lockUncancelable(global.io());
+                defer self.draw_mutex.unlock(global.io());
+
+                self.cursor_blink_visible = visible;
+                if (self.updateCursorBlinkUniform()) {
+                    self.uniforms_changed = true;
+                }
+            }
+
+            // Run the display link (if we have one) so the change is drawn.
+            self.syncDisplayLink(null, null);
+        }
+
+        /// Update the `cursor_blink_visible` uniform from the blink phase
+        /// and the current cursor state. Returns true if it changed.
+        ///
+        /// Caller must hold the draw mutex.
+        fn updateCursorBlinkUniform(self: *Self) bool {
+            // A cursor that can't blink right now is never blinked off,
+            // whatever phase the blink timer is in.
+            const visible = self.cursor_blink_visible or
+                !self.cursorBlinkable();
+            const changed = self.uniforms.bools.cursor_blink_visible != visible;
+            self.uniforms.bools.cursor_blink_visible = visible;
+            return changed;
+        }
+
         /// Called when the apprt reports a change in how well
         /// frames can be presented.
         pub fn setPresentationHealth(self: *Self, health: Health) void {
@@ -1308,9 +1386,11 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             const should_run =
                 // Non-visible windows never vsync
                 self.visible and
-                // Only vsync if we have cell or image changes or animation
+                // Only vsync if we have cell, image, or uniform changes
+                // or animation
                 (self.cells_rebuilt or
                     self.images_rebuilt or
+                    self.uniforms_changed or
                     self.animationWake() != null);
 
             display_link.setRunning(should_run);
@@ -1655,13 +1735,19 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 self.draw_mutex.lockUncancelable(global.io());
                 defer self.draw_mutex.unlock(global.io());
 
-                // Build our GPU cells
+                // Remember whether we have preedit text so that
+                // cursorBlinkable agrees with the cursor we draw here.
+                self.has_preedit = critical.preedit != null;
+
+                // Build our GPU cells. The cursor is always built as if
+                // it is blinked on. The blink phase is applied with a
+                // uniform below so that a blink doesn't rebuild cells.
                 self.rebuildCells(
                     critical.preedit,
                     renderer.cursorStyle(&self.terminal_state, .{
                         .preedit = critical.preedit != null,
                         .focused = self.focused,
-                        .blink_visible = cursor_blink_visible,
+                        .blink_visible = true,
                     }),
                     &critical.links,
                 ) catch |err| {
@@ -1671,6 +1757,13 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     comptime assert(@TypeOf(err) == error{OutOfMemory});
                     log.warn("error rebuilding GPU cells err={}", .{err});
                 };
+
+                // Apply the blink phase now that the cursor state is
+                // up to date.
+                self.cursor_blink_visible = cursor_blink_visible;
+                if (self.updateCursorBlinkUniform()) {
+                    self.uniforms_changed = true;
+                }
 
                 // The scrollbar is only emitted during draws so we also
                 // check the scrollbar cache here and update if needed.
@@ -1808,6 +1901,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 swap_chain_rebuilt or
                 self.cells_rebuilt or
                 self.images_rebuilt or
+                self.uniforms_changed or
                 self.animationWake() != null or
                 sync;
 
@@ -1819,6 +1913,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             }
             self.cells_rebuilt = false;
             self.images_rebuilt = false;
+            self.uniforms_changed = false;
 
             // If the draw fails from here on, the frame on screen no
             // longer matches our state: the size, cells, or images
@@ -1896,8 +1991,16 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
             // Setup our frame data
             try frame.uniforms.sync(&.{self.uniforms});
-            try frame.cells_bg.sync(self.cells.bg_cells);
-            const fg_count = try frame.cells.syncFromArrayLists(self.cells.fg_rows);
+
+            // Only upload our cells if they changed since this frame last
+            // uploaded them. Draws that don't rebuild cells, such as for a
+            // cursor blink or a custom shader animation, reuse the cells
+            // that are already on the GPU.
+            if (frame.cells_modified != self.cells_modified) {
+                try frame.cells_bg.sync(self.cells.bg_cells);
+                frame.fg_count = try frame.cells.syncFromArrayLists(self.cells.fg_rows);
+                frame.cells_modified = self.cells_modified;
+            }
 
             // If our background image buffer has changed, sync it.
             if (frame.bg_image_buffer_modified != self.bg_image_buffer_modified) {
@@ -2016,7 +2119,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     .draw = .{
                         .type = .triangle_strip,
                         .vertex_count = 4,
-                        .instance_count = fg_count,
+                        .instance_count = frame.fg_count,
                     },
                 });
 
@@ -2946,8 +3049,10 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 }
             }
 
-            // Update that our cells rebuilt
+            // Update that our cells rebuilt, so every frame must
+            // upload them again.
             self.cells_rebuilt = true;
+            self.cells_modified +%= 1;
 
             // Log some things
             // log.debug("rebuildCells complete cached_runs={}", .{

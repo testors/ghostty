@@ -67,6 +67,21 @@ pub fn style(
     return .fromTerminal(state.cursor.visual_style);
 }
 
+/// Returns true if the blink state affects the rendered cursor, i.e.
+/// `style` differs between a visible and a hidden blink. When this is
+/// false a blink tick can't change the frame, so the renderer doesn't
+/// need to wake up or draw for it.
+pub fn blinkable(
+    state: *const terminal.RenderState,
+    opts: StyleOptions,
+) bool {
+    var visible = opts;
+    visible.blink_visible = true;
+    var hidden = opts;
+    hidden.blink_visible = false;
+    return style(state, visible) != style(state, hidden);
+}
+
 test "cursor: default uses configured style" {
     const testing = std.testing;
     const alloc = testing.allocator;
@@ -155,4 +170,55 @@ test "cursor: always block with preedit" {
     try testing.expect(style(&state, .{ .preedit = true, .focused = true, .blink_visible = false }) == null);
     try testing.expect(style(&state, .{ .preedit = true, .focused = true, .blink_visible = true }) == null);
     try testing.expect(style(&state, .{ .preedit = true, .focused = false, .blink_visible = true }) == null);
+}
+
+test "cursor: blinkable" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    const io = testing.io;
+    var term: terminal.Terminal = try .init(io, alloc, .{ .cols = 10, .rows = 10 });
+    defer term.deinit(alloc);
+
+    var state: terminal.RenderState = .empty;
+    defer state.deinit(alloc);
+
+    // A focused, blinking cursor is the only case where the blink
+    // changes what is drawn.
+    term.modes.set(.cursor_blinking, true);
+    try state.update(alloc, &term);
+    try testing.expect(blinkable(&state, .{ .focused = true }));
+
+    // Unfocused is always a hollow block.
+    try testing.expect(!blinkable(&state, .{ .focused = false }));
+
+    // Preedit is always a block.
+    try testing.expect(!blinkable(&state, .{ .focused = true, .preedit = true }));
+
+    // Steady cursor.
+    term.modes.set(.cursor_blinking, false);
+    try state.update(alloc, &term);
+    try testing.expect(!blinkable(&state, .{ .focused = true }));
+    term.modes.set(.cursor_blinking, true);
+
+    // Cursor hidden by the terminal.
+    term.modes.set(.cursor_visible, false);
+    try state.update(alloc, &term);
+    try testing.expect(!blinkable(&state, .{ .focused = true }));
+    term.modes.set(.cursor_visible, true);
+
+    // Password input is always a lock.
+    term.flags.password_input = true;
+    try state.update(alloc, &term);
+    try testing.expect(!blinkable(&state, .{ .focused = true }));
+    term.flags.password_input = false;
+
+    // Back to blinkable once everything is restored.
+    try state.update(alloc, &term);
+    try testing.expect(blinkable(&state, .{ .focused = true }));
+
+    // Scrolled so the cursor is outside the viewport.
+    for (0..100) |_| try term.index();
+    term.scrollViewport(.{ .top = {} });
+    try state.update(alloc, &term);
+    try testing.expect(!blinkable(&state, .{ .focused = true }));
 }

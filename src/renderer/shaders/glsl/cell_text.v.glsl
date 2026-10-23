@@ -45,6 +45,7 @@ void main() {
     uvec2 cursor_pos = unpack2u16(cursor_pos_packed_2u16);
     bool cursor_wide = (bools & CURSOR_WIDE) != 0;
     bool use_linear_blending = (bools & USE_LINEAR_BLENDING) != 0;
+    bool cursor_blink_visible = (bools & CURSOR_BLINK_VISIBLE) != 0;
 
     // Convert the grid x, y into world space x, y by accounting for cell size
     vec2 cell_pos = cell_size * vec2(grid_pos);
@@ -100,6 +101,13 @@ void main() {
     vec2 size = vec2(glyph_size);
     vec2 offset = vec2(bearings);
 
+    // During the hidden phase of a cursor blink we don't draw the cursor
+    // glyph. It stays in our cells so that a blink doesn't have to rebuild
+    // them, so we collapse its quad to a point and nothing is rasterized.
+    if (!cursor_blink_visible && (glyph_bools & IS_CURSOR_GLYPH) != 0) {
+        size = vec2(0.0f);
+    }
+
     offset.y = cell_size.y - offset.y;
 
     // Calculate the final position of the cell which uses our glyph size
@@ -140,7 +148,11 @@ void main() {
 
     // If this cell is the cursor cell, but we're not processing
     // the cursor glyph itself, then we need to change the color.
-    if ((glyph_bools & IS_CURSOR_GLYPH) == 0 && is_cursor_pos) {
+    // Not while the cursor is blinked off though, since then there
+    // is no cursor drawn behind the text.
+    if (cursor_blink_visible &&
+            (glyph_bools & IS_CURSOR_GLYPH) == 0 &&
+            is_cursor_pos) {
         out_data.color = load_color(unpack4u8(cursor_color_packed_4u8), use_linear_blending);
     }
 }

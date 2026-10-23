@@ -673,8 +673,25 @@ fn cursorTimerCallback(
         return .disarm;
     };
 
-    t.flags.cursor_blink_visible = !t.flags.cursor_blink_visible;
-    t.wakeup.notify() catch {};
+    // Only draw if the blink changes what is drawn. If the cursor
+    // can't blink right now (steady, hidden, scrolled out of the
+    // viewport, preedit, etc.) a redraw would produce the same frame.
+    // The timer keeps running regardless: it is cheap, and whatever
+    // changes the cursor state wakes the renderer on its own, which
+    // then draws with the current blink state.
+    if (t.flags.visible and t.renderer.cursorBlinkable()) {
+        t.flags.cursor_blink_visible = !t.flags.cursor_blink_visible;
+
+        // A blink only changes a uniform since the cells always
+        // contain the cursor. So we skip the frame update, and the
+        // terminal lock it takes, and only draw.
+        t.renderer.setCursorBlinkVisible(t.flags.cursor_blink_visible);
+        t.drawFrame(false);
+    } else {
+        // Keep the cursor shown so it doesn't start out hidden when
+        // it becomes able to blink again.
+        t.flags.cursor_blink_visible = true;
+    }
 
     t.cursor_h.run(
         &t.loop,

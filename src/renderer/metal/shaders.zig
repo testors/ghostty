@@ -252,6 +252,11 @@ pub const Uniforms = extern struct {
         /// with linear alpha blending have a similar apparent weight
         /// (thickness) to gamma-incorrect blending.
         use_linear_correction: bool align(1) = false,
+
+        /// False during the hidden phase of a cursor blink. The cursor
+        /// glyph is not drawn and the text under a block cursor keeps
+        /// its own color.
+        cursor_blink_visible: bool align(1) = true,
     },
 
     const PaddingExtend = packed struct(u8) {

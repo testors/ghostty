@@ -218,7 +218,12 @@ pub const Uniforms = extern struct {
         /// (thickness) to gamma-incorrect blending.
         use_linear_correction: bool = false,
 
-        _padding: u28 = 0,
+        /// False during the hidden phase of a cursor blink. The cursor
+        /// glyph is not drawn and the text under a block cursor keeps
+        /// its own color.
+        cursor_blink_visible: bool = true,
+
+        _padding: u27 = 0,
     };
 
     const PaddingExtend = packed struct(u32) {

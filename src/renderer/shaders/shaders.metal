@@ -24,6 +24,7 @@ struct Uniforms {
   bool use_display_p3;
   bool use_linear_blending;
   bool use_linear_correction;
+  bool cursor_blink_visible;
 };
 
 //-------------------------------------------------------------------
@@ -612,6 +613,13 @@ vertex CellTextVertexOut cell_text_vertex(
   float2 size = float2(in.glyph_size);
   float2 offset = float2(in.bearings);
 
+  // During the hidden phase of a cursor blink we don't draw the cursor
+  // glyph. It stays in our cells so that a blink doesn't have to rebuild
+  // them, so we collapse its quad to a point and nothing is rasterized.
+  if (!uniforms.cursor_blink_visible && (in.bools & IS_CURSOR_GLYPH) != 0) {
+    size = float2(0.0f);
+  }
+
   offset.y = uniforms.cell_size.y - offset.y;
 
   // Calculate the final position of the cell which uses our glyph size
@@ -664,7 +672,11 @@ vertex CellTextVertexOut cell_text_vertex(
 
   // If this cell is the cursor cell, but we're not processing
   // the cursor glyph itself, then we need to change the color.
-  if ((in.bools & IS_CURSOR_GLYPH) == 0 && is_cursor_pos) {
+  // Not while the cursor is blinked off though, since then there
+  // is no cursor drawn behind the text.
+  if (uniforms.cursor_blink_visible &&
+      (in.bools & IS_CURSOR_GLYPH) == 0 &&
+      is_cursor_pos) {
     out.color = load_color(
       uniforms.cursor_color,
       uniforms.use_display_p3,

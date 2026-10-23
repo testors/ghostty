@@ -30,6 +30,7 @@ const uint CURSOR_WIDE = 1u;
 const uint USE_DISPLAY_P3 = 2u;
 const uint USE_LINEAR_BLENDING = 4u;
 const uint USE_LINEAR_CORRECTION = 8u;
+const uint CURSOR_BLINK_VISIBLE = 16u;
 
 // Padding extend enum
 const uint EXTEND_LEFT = 1u;
