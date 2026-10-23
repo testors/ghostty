@@ -14,7 +14,8 @@ template $GhosttyTab: Box {
     split_tree.active-surface as <$GhosttySurface>.title-override,
     template.title-override,
     split_tree.is-zoomed,
-    split_tree.active-surface as <$GhosttySurface>.bell-ringing
+    split_tree.active-surface as <$GhosttySurface>.bell-ringing,
+    split_tree.active-surface as <$GhosttySurface>.pwd
     ) as <string>;
   tooltip: bind split_tree.active-surface as <$GhosttySurface>.pwd;
 

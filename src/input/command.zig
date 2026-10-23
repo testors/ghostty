@@ -471,6 +471,24 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = "Prompt for a new title for the current window.",
         }},
 
+        .reset_surface_title => comptime &.{.{
+            .action = .reset_surface_title,
+            .title = i18n.N_("Reset Terminal Title"),
+            .description = i18n.N_("Reset the terminal title to the title set by the terminal program."),
+        }},
+
+        .reset_tab_title => comptime &.{.{
+            .action = .reset_tab_title,
+            .title = i18n.N_("Reset Tab Title"),
+            .description = i18n.N_("Reset the tab title to the title set by the terminal."),
+        }},
+
+        .reset_window_title => comptime &.{.{
+            .action = .reset_window_title,
+            .title = "Reset Window Title",
+            .description = "Reset the window title to the title set by the terminal.",
+        }},
+
         .new_split => comptime &.{
             .{
                 .action = .{ .new_split = .left },

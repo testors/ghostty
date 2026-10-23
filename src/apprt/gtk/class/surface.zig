@@ -1866,6 +1866,11 @@ pub const Surface = extern struct {
                 actionPromptTitle,
                 null,
             ),
+            .init(
+                "reset-title",
+                actionResetTitle,
+                null,
+            ),
             .initStateful(
                 "notify-on-next-command-finish",
                 actionNotifyOnNextCommandFinish,
@@ -2639,6 +2644,17 @@ pub const Surface = extern struct {
         const surface = self.core() orelse return;
         _ = surface.performBindingAction(.prompt_surface_title) catch |err| {
             log.warn("unable to perform prompt title action err={}", .{err});
+        };
+    }
+
+    pub fn actionResetTitle(
+        _: *gio.SimpleAction,
+        _: ?*glib.Variant,
+        self: *Self,
+    ) callconv(.c) void {
+        const surface = self.core() orelse return;
+        _ = surface.performBindingAction(.reset_surface_title) catch |err| {
+            log.warn("unable to perform reset title action err={}", .{err});
         };
     }
 

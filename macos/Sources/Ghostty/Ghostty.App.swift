@@ -662,6 +662,9 @@ extension Ghostty {
             case GHOSTTY_ACTION_PROMPT_TITLE:
                 return promptTitle(app, target: target, v: action.action.prompt_title)
 
+            case GHOSTTY_ACTION_RESET_TITLE:
+                return resetTitle(app, target: target, v: action.action.reset_title)
+
             case GHOSTTY_ACTION_PWD:
                 pwdChanged(app, target: target, v: action.action.pwd)
 
@@ -1925,7 +1928,7 @@ extension Ghostty {
                     return false
                 }
 
-            case .tab:
+            case .tab, .window:
                 switch target.tag {
                 case GHOSTTY_TARGET_APP:
                     guard let window = NSApp.mainWindow ?? NSApp.keyWindow,
@@ -1941,6 +1944,54 @@ extension Ghostty {
                           let controller = window.windowController as? BaseTerminalController
                     else { return false }
                     controller.promptTabTitle()
+                    return true
+
+                default:
+                    assertionFailure()
+                    return false
+                }
+            }
+        }
+
+        private static func resetTitle(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s,
+            v: ghostty_action_prompt_title_e) -> Bool {
+            let resetTitle = Action.PromptTitle(v)
+            switch resetTitle {
+            case .surface:
+                switch target.tag {
+                case GHOSTTY_TARGET_APP:
+                    Ghostty.logger.warning("reset title does nothing with an app target")
+                    return false
+
+                case GHOSTTY_TARGET_SURFACE:
+                    guard let surface = target.target.surface else { return false }
+                    guard let surfaceView = self.surfaceView(from: surface) else { return false }
+                    surfaceView.resetTitle()
+                    return true
+
+                default:
+                    assertionFailure()
+                    return false
+                }
+
+            case .tab, .window:
+                switch target.tag {
+                case GHOSTTY_TARGET_APP:
+                    guard let window = NSApp.mainWindow ?? NSApp.keyWindow,
+                          let controller = window.windowController as? BaseTerminalController
+                    else { return false }
+                    controller.titleOverride = nil
+                    return true
+
+                case GHOSTTY_TARGET_SURFACE:
+                    guard let surface = target.target.surface else { return false }
+                    guard let surfaceView = self.surfaceView(from: surface) else { return false }
+                    guard let window = surfaceView.window,
+                          let controller = window.windowController as? BaseTerminalController
+                    else { return false }
+                    controller.titleOverride = nil
                     return true
 
                 default:

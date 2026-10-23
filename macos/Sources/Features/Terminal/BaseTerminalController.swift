@@ -890,8 +890,15 @@ class BaseTerminalController: NSWindowController,
            surfaceTree.contains(titleSurface) {
             // If we have a surface, we want to listen for title changes.
             titleSurface.$title
-                .combineLatest(titleSurface.$bell)
-                .map { [weak self] in self?.computeTitle(title: $0, bell: $1) ?? "" }
+                .combineLatest(titleSurface.$bell, titleSurface.$pwd)
+                .map { [weak self] title, bell, pwd in
+                    guard let self else { return "" }
+                    let formatted = self.formattedTitle(
+                        title: title,
+                        pwd: pwd,
+                        isOverridden: titleSurface.isTitleOverridden)
+                    return self.computeTitle(title: formatted, bell: bell)
+                }
                 .sink { [weak self] in self?.titleDidChange(to: $0) }
                 .store(in: &focusedSurfaceCancellables)
         } else {
@@ -909,9 +916,99 @@ class BaseTerminalController: NSWindowController,
         return result
     }
 
+    private func formattedTitle(
+        title: String,
+        pwd: String?,
+        isOverridden: Bool
+    ) -> String {
+        guard !isOverridden else { return title }
+        guard let format = ghostty.config.tabTitleFormat, !format.isEmpty else {
+            return title
+        }
+
+        return expandTitleFormat(format, pwd: pwd, terminalTitle: title)
+    }
+
+    private func expandTitleFormat(
+        _ format: String,
+        pwd: String?,
+        terminalTitle: String?
+    ) -> String {
+        var result = ""
+        var index = format.startIndex
+        while index < format.endIndex {
+            let char = format[index]
+            if char == "%" {
+                let next = format.index(after: index)
+                if next < format.endIndex {
+                    let variable = format[next]
+                    switch variable {
+                    case "d":
+                        result += pwd ?? ""
+                    case "c":
+                        result += terminalTitle ?? ""
+                    case "g":
+                        result += gitBranch(pwd) ?? ""
+                    case "%":
+                        result += "%"
+                    default:
+                        result += "%\(variable)"
+                    }
+                    index = format.index(after: next)
+                    continue
+                }
+            }
+            result.append(char)
+            index = format.index(after: index)
+        }
+        return result
+    }
+
+    private func gitBranch(_ pwd: String?) -> String? {
+        guard let pwd else { return nil }
+        var url = URL(fileURLWithPath: pwd)
+        while true {
+            let gitURL = url.appendingPathComponent(".git")
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: gitURL.path, isDirectory: &isDirectory) {
+                let headURL: URL
+                if isDirectory.boolValue {
+                    headURL = gitURL.appendingPathComponent("HEAD")
+                } else {
+                    guard let contents = try? String(contentsOf: gitURL, encoding: .utf8),
+                          let line = contents.split(separator: "\n").first,
+                          line.hasPrefix("gitdir: ") else { return nil }
+                    let gitdir = String(line.dropFirst("gitdir: ".count))
+                    let resolved = URL(fileURLWithPath: gitdir, relativeTo: url).standardized
+                    headURL = resolved.appendingPathComponent("HEAD")
+                }
+                guard let head = try? String(contentsOf: headURL, encoding: .utf8) else { return nil }
+                let trimmed = head.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.hasPrefix("ref: refs/heads/") {
+                    return String(trimmed.dropFirst("ref: refs/heads/".count))
+                }
+                return String(trimmed.prefix(7))
+            }
+            let parent = url.deletingLastPathComponent()
+            if parent.path == url.path { return nil }
+            url = parent
+        }
+    }
+
     private func titleDidChange(to: String) {
         lastComputedTitle = to
         applyTitleToWindow()
+    }
+
+    /// Recompute the title from the focused surface. This is used when
+    /// configuration changes that affect the title format.
+    func recomputeTitle() {
+        guard let surface = focusedSurface else { return }
+        let formatted = formattedTitle(
+            title: surface.title,
+            pwd: surface.pwd,
+            isOverridden: surface.isTitleOverridden)
+        titleDidChange(to: computeTitle(title: formatted, bell: surface.bell))
     }
 
     private func applyTitleToWindow() {
@@ -919,7 +1016,7 @@ class BaseTerminalController: NSWindowController,
 
         if let titleOverride {
             window.title = computeTitle(
-                title: titleOverride,
+                title: "✏️ \(titleOverride)",
                 bell: focusedSurface?.bell ?? false)
             return
         }
@@ -1331,6 +1428,10 @@ class BaseTerminalController: NSWindowController,
         }
 
         promptTabTitle()
+    }
+
+    @IBAction func resetTabTitle(_ sender: Any) {
+        titleOverride = nil
     }
 
     @IBAction func splitRight(_ sender: Any) {

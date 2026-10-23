@@ -345,6 +345,11 @@ menu context_menu_model {
       }
 
       item {
+        label: _("Reset Title");
+        action: "surface.reset-title";
+      }
+
+      item {
         label: _("Split Up");
         action: "split-tree.new-split";
         target: "up";
@@ -380,6 +385,11 @@ menu context_menu_model {
       item {
         label: _("Change Tab Title…");
         action: "tab.prompt-tab-title";
+      }
+
+      item {
+        label: _("Reset Tab Title");
+        action: "tab.reset-tab-title";
       }
 
       item {

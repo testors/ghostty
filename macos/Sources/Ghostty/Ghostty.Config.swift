@@ -211,6 +211,15 @@ extension Ghostty {
             return String(cString: ptr)
         }
 
+        var tabTitleFormat: String? {
+            guard let config = self.config else { return nil }
+            var v: UnsafePointer<Int8>?
+            let key = "tab-title-format"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return nil }
+            guard let ptr = v else { return nil }
+            return String(cString: ptr)
+        }
+
         var windowSaveState: String {
             guard let config = self.config else { return "" }
             var v: UnsafePointer<Int8>?

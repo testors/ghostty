@@ -71,6 +71,8 @@ class AppDelegate: NSObject,
     @IBOutlet private var menuResetFontSize: NSMenuItem?
     @IBOutlet private var menuChangeTitle: NSMenuItem?
     @IBOutlet private var menuChangeTabTitle: NSMenuItem?
+    @IBOutlet private var menuResetTitle: NSMenuItem?
+    @IBOutlet private var menuResetTabTitle: NSMenuItem?
     @IBOutlet private var menuReadonly: NSMenuItem?
     @IBOutlet private var menuQuickTerminal: NSMenuItem?
     @IBOutlet private var menuTerminalInspector: NSMenuItem?
@@ -849,6 +851,7 @@ class AppDelegate: NSObject,
             self.syncMenuShortcuts(config)
         }
         TerminalController.all.forEach { $0.relabelTabs() }
+        TerminalController.all.forEach { $0.recomputeTitle() }
 
         // Update our badge since config can change what we show.
         syncDockBadge()
@@ -1253,6 +1256,8 @@ extension AppDelegate {
         syncMenuShortcut(config, action: "reset_font_size", menuItem: self.menuResetFontSize)
         syncMenuShortcut(config, action: "prompt_surface_title", menuItem: self.menuChangeTitle)
         syncMenuShortcut(config, action: "prompt_tab_title", menuItem: self.menuChangeTabTitle)
+        syncMenuShortcut(config, action: "reset_surface_title", menuItem: self.menuResetTitle)
+        syncMenuShortcut(config, action: "reset_tab_title", menuItem: self.menuResetTabTitle)
         syncMenuShortcut(config, action: "toggle_quick_terminal", menuItem: self.menuQuickTerminal)
         syncMenuShortcut(config, action: "toggle_visibility", menuItem: self.menuToggleVisibility)
         syncMenuShortcut(config, action: "toggle_window_float_on_top", menuItem: self.menuFloatOnTop)

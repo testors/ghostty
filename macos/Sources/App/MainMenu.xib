@@ -18,6 +18,8 @@
                 <outlet property="menuBringAllToFront" destination="LE2-aR-0XJ" id="AP9-oK-60V"/>
                 <outlet property="menuChangeTabTitle" destination="iac-lh-Cl7" id="tId-v0-a3E"/>
                 <outlet property="menuChangeTitle" destination="24I-xg-qIq" id="kg6-kT-jNL"/>
+                <outlet property="menuResetTabTitle" destination="rst-tb-t01" id="rst-tb-o01"/>
+                <outlet property="menuResetTitle" destination="rst-tm-t01" id="rst-tm-o01"/>
                 <outlet property="menuCheckForUpdates" destination="GEA-5y-yzH" id="0nV-Tf-nJQ"/>
                 <outlet property="menuClose" destination="DVo-aG-piG" id="R3t-0C-aSU"/>
                 <outlet property="menuCloseAllWindows" destination="yKr-Vi-Yqw" id="Zet-Ir-zbm"/>
@@ -350,6 +352,18 @@
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="changeTitle:" target="-1" id="XuL-QB-Q9l"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="Reset Tab Title" id="rst-tb-t01">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="resetTabTitle:" target="-1" id="rst-tb-a01"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="Reset Terminal Title" id="rst-tm-t01">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="resetTitle:" target="-1" id="rst-tm-a01"/>
                                 </connections>
                             </menuItem>
                             <menuItem title="Terminal Read-only" id="xpe-ia-Yjw">

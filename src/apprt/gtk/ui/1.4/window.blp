@@ -93,6 +93,11 @@ template $GhosttyWindow: Adw.ApplicationWindow {
         view: tab_view;
         visible: bind template.tabs-visible;
 
+        GestureClick {
+          pressed => $tab_bar_pressed();
+          button: 0;
+        }
+
         [start]
         Gtk.Box {
           orientation: horizontal;
@@ -340,5 +345,10 @@ menu tab_context_menu {
   item {
     label: _("Change Tab Title…");
     action: "win.prompt-context-tab-title";
+  }
+
+  item {
+    label: _("Reset Tab Title");
+    action: "win.reset-tab-title";
   }
 }

@@ -17,6 +17,7 @@ const SplitTree = @import("split_tree.zig").SplitTree;
 const Surface = @import("surface.zig").Surface;
 const TitleDialog = @import("title_dialog.zig").TitleDialog;
 const Overrides = @import("Overrides.zig");
+const titlepkg = @import("../../../title.zig");
 
 const log = std.log.scoped(.gtk_ghostty_window);
 
@@ -239,6 +240,7 @@ pub const Tab = extern struct {
             .init("next-page", actionNextPage, null),
             .init("previous-page", actionPreviousPage, null),
             .init("prompt-tab-title", actionPromptTabTitle, null),
+            .init("reset-tab-title", actionResetTabTitle, null),
         };
 
         _ = ext.actions.addAsGroup(Self, self, "tab", &actions);
@@ -436,6 +438,14 @@ pub const Tab = extern struct {
         self.promptTabTitle();
     }
 
+    fn actionResetTabTitle(
+        _: *gio.SimpleAction,
+        _: ?*glib.Variant,
+        self: *Self,
+    ) callconv(.c) void {
+        self.setTitleOverride(null);
+    }
+
     fn actionRingBell(
         _: *gio.SimpleAction,
         _: ?*glib.Variant,
@@ -481,14 +491,20 @@ pub const Tab = extern struct {
         tab_override_: ?[*:0]const u8,
         zoomed_: c_int,
         bell_ringing_: c_int,
+        pwd_: ?[*:0]const u8,
         _: *gobject.ParamSpec,
     ) callconv(.c) ?[*:0]const u8 {
         const zoomed = zoomed_ != 0;
         const bell_ringing = bell_ringing_ != 0;
+        const alloc = Application.default().allocator();
 
         // Our plain title is the manually tab overridden title if it exists,
-        // otherwise the overridden title if it exists, otherwise
-        // the terminal title if it exists, otherwise a default string.
+        // otherwise the overridden title if it exists, otherwise the
+        // configured tab title format, otherwise the terminal title if it
+        // exists, otherwise a default string.
+        var plain_owned: ?[]const u8 = null;
+        defer if (plain_owned) |v| alloc.free(v);
+
         const plain = plain: {
             const default = "Ghostty";
             const config_title: ?[*:0]const u8 = title: {
@@ -496,12 +512,33 @@ pub const Tab = extern struct {
                 break :title config.get().title orelse null;
             };
 
-            const plain = tab_override_ orelse
-                surface_override_ orelse
-                terminal_ orelse
-                config_title orelse
-                break :plain default;
-            break :plain std.mem.span(plain);
+            if (tab_override_) |v| break :plain std.mem.span(v);
+            if (surface_override_) |v| break :plain std.mem.span(v);
+
+            if (config_) |config_ptr| {
+                const config = config_ptr.get();
+                if (config.@"tab-title-format") |format| {
+                    const pwd = if (pwd_) |v| std.mem.span(v) else null;
+                    const terminal = if (terminal_) |v| std.mem.span(v) else null;
+                    const branch = if (std.mem.indexOf(u8, format, "%g") != null)
+                        (if (pwd) |p| titlepkg.gitBranch(alloc, p) catch null else null)
+                    else
+                        null;
+                    defer if (branch) |b| alloc.free(b);
+
+                    const expanded = titlepkg.expand(
+                        alloc,
+                        format,
+                        pwd,
+                        terminal,
+                        branch,
+                    ) catch break :plain std.mem.span(terminal_ orelse config_title orelse default);
+                    plain_owned = expanded;
+                    break :plain expanded;
+                }
+            }
+
+            break :plain std.mem.span(terminal_ orelse config_title orelse default);
         };
 
         // We don't need a config in every case, but if we don't have a config
@@ -514,8 +551,13 @@ pub const Tab = extern struct {
         };
 
         // Use an allocator to build up our string as we write it.
-        var buf: std.Io.Writer.Allocating = .init(Application.default().allocator());
+        var buf: std.Io.Writer.Allocating = .init(alloc);
         defer buf.deinit();
+
+        // If the tab title is manually overridden, prefix a pencil.
+        if (tab_override_ != null) {
+            buf.writer.writeAll("✏️ ") catch {};
+        }
 
         // If our bell is ringing, then we prefix the bell icon to the title.
         if (bell_ringing and config.@"bell-features".title) {

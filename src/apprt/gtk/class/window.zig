@@ -400,6 +400,7 @@ pub const Window = extern struct {
             .init("prompt-surface-title", actionPromptSurfaceTitle, null),
             .init("prompt-tab-title", actionPromptTabTitle, null),
             .init("prompt-context-tab-title", actionPromptContextTabTitle, null),
+            .init("reset-tab-title", actionResetTabTitle, null),
             .init("prompt-window-title", actionPromptWindowTitle, null),
             .init("ring-bell", actionRingBell, null),
             .init("split-right", actionSplitRight, null),
@@ -2118,12 +2119,36 @@ pub const Window = extern struct {
         self.performBindingAction(.prompt_tab_title);
     }
 
+    fn actionResetTabTitle(
+        _: *gio.SimpleAction,
+        _: ?*glib.Variant,
+        self: *Window,
+    ) callconv(.c) void {
+        self.performBindingAction(.reset_tab_title);
+    }
+
     fn actionPromptWindowTitle(
         _: *gio.SimpleAction,
         _: ?*glib.Variant,
         self: *Window,
     ) callconv(.c) void {
         self.performBindingAction(.prompt_window_title);
+    }
+
+    fn tabBarPressed(
+        _: *gtk.GestureClick,
+        n_press: c_int,
+        _: f64,
+        _: f64,
+        self: *Self,
+    ) callconv(.c) void {
+        if (n_press != 2) return;
+
+        const priv = self.private();
+        const page = priv.tab_view.getSelectedPage() orelse return;
+        const child = page.getChild();
+        const tab = gobject.ext.cast(Tab, child) orelse return;
+        tab.promptTabTitle();
     }
 
     fn actionSplitRight(

@@ -5346,6 +5346,24 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             );
         },
 
+        .reset_surface_title => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .reset_title,
+            .surface,
+        ),
+
+        .reset_tab_title => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .reset_title,
+            .tab,
+        ),
+
+        .reset_window_title => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .reset_title,
+            .window,
+        ),
+
         .clear_screen => {
             // This is a duplicate of some of the logic in termio.clearScreen
             // but we need to do this here so we can know the answer before

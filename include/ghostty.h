@@ -1016,6 +1016,7 @@ typedef enum {
   GHOSTTY_ACTION_COPY_TITLE_TO_CLIPBOARD,
   GHOSTTY_ACTION_MOVE_TAB_TO_NEW_WINDOW,
   GHOSTTY_ACTION_RESIZE_WINDOW,
+  GHOSTTY_ACTION_RESET_TITLE,
 } ghostty_action_tag_e;
 
 typedef union {
@@ -1037,6 +1038,7 @@ typedef union {
   ghostty_action_set_title_s set_title;
   ghostty_action_set_title_s set_tab_title;
   ghostty_action_prompt_title_e prompt_title;
+  ghostty_action_prompt_title_e reset_title;
   ghostty_action_pwd_s pwd;
   ghostty_action_mouse_shape_e mouse_shape;
   ghostty_action_mouse_visibility_e mouse_visibility;

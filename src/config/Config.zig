@@ -1540,6 +1540,24 @@ fullscreen: Fullscreen = .false,
 /// to get the new title.
 title: ?[:0]const u8 = null,
 
+/// The format string for tab titles. If unset, the tab title is the title
+/// set by the terminal program (or the configured `title`).
+///
+/// The following variables are supported:
+///
+///   * `%d` - The current working directory.
+///   * `%c` - The current terminal title, which is usually the running
+///     command when shell integration is enabled.
+///   * `%g` - The current git branch, if the working directory is in a
+///     git repository.
+///   * `%%` - A literal `%`.
+///
+/// For example, `tab-title-format = "%g — %d"` shows the git branch and
+/// working directory in the tab title.
+///
+/// This configuration can be reloaded at runtime.
+@"tab-title-format": ?[:0]const u8 = null,
+
 /// The setting that will change the application class value.
 ///
 /// This controls the class field of the `WM_CLASS` X11 property (when running
@@ -6822,6 +6840,18 @@ pub const Keybinds = struct {
             .{ .next_tab = {} },
         );
 
+        // Title overrides
+        try self.set.put(
+            alloc,
+            .{ .key = .{ .unicode = 'r' }, .mods = inputpkg.ctrlOrSuper(.{ .shift = true }) },
+            .{ .prompt_tab_title = {} },
+        );
+        try self.set.put(
+            alloc,
+            .{ .key = .{ .unicode = 'r' }, .mods = inputpkg.ctrlOrSuper(.{ .alt = true }) },
+            .{ .prompt_surface_title = {} },
+        );
+
         // Windowing
         if (comptime !builtin.target.os.tag.isDarwin()) {
             try self.set.put(
@@ -7683,6 +7713,31 @@ pub const Keybinds = struct {
         var set: Keybinds = .{};
         try set.parseCLI(alloc, "shift+a=copy_to_clipboard");
         try set.parseCLI(alloc, "shift+a=csi:hello");
+    }
+
+    test "default title keybinds" {
+        const testing = std.testing;
+        var arena = ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const alloc = arena.allocator();
+
+        var set: Keybinds = .{};
+        try set.init(alloc);
+
+        try testing.expectEqual(
+            inputpkg.Trigger{
+                .key = .{ .unicode = 'r' },
+                .mods = inputpkg.ctrlOrSuper(.{ .shift = true }),
+            },
+            set.set.getTrigger(.{ .prompt_tab_title = {} }).?,
+        );
+        try testing.expectEqual(
+            inputpkg.Trigger{
+                .key = .{ .unicode = 'r' },
+                .mods = inputpkg.ctrlOrSuper(.{ .alt = true }),
+            },
+            set.set.getTrigger(.{ .prompt_surface_title = {} }).?,
+        );
     }
 
     test "formatConfig single" {

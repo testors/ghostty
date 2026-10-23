@@ -609,7 +609,7 @@ pub const Action = union(enum) {
     /// title set via this prompt overrides any title set by the terminal
     /// and persists across focus changes within the tab.
     ///
-    /// Only implemented on Linux.
+    /// On macOS, this is equivalent to changing the tab title.
     prompt_window_title,
 
     /// Set the title for the current focused surface.
@@ -628,6 +628,18 @@ pub const Action = union(enum) {
     ///
     /// Only implement on Linux.
     set_window_title: []const u8,
+
+    /// Reset the title of the current focused surface to the title set by
+    /// the terminal program.
+    reset_surface_title,
+
+    /// Reset the title of the current tab to the title set by the terminal.
+    reset_tab_title,
+
+    /// Reset the title of the current window to the title set by the terminal.
+    ///
+    /// On macOS, this is equivalent to resetting the tab title.
+    reset_window_title,
 
     /// Create a new split in the specified direction.
     ///
@@ -1403,6 +1415,9 @@ pub const Action = union(enum) {
             .set_surface_title,
             .set_tab_title,
             .set_window_title,
+            .reset_surface_title,
+            .reset_tab_title,
+            .reset_window_title,
             .clear_screen,
             .select_all,
             .scroll_to_top,

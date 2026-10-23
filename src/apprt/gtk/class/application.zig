@@ -780,6 +780,7 @@ pub const Application = extern struct {
             .set_title => Action.setTitle(target, value),
             .set_tab_title => return Action.setTabTitle(target, value),
             .set_window_title => return Action.setWindowTitle(target, value),
+            .reset_title => return Action.resetTitle(target, value),
 
             .show_child_exited => return Action.showChildExited(target, value),
 
@@ -2993,6 +2994,57 @@ const Action = struct {
                 };
                 window.setTitleOverride(if (value.title.len == 0) null else value.title);
                 return true;
+            },
+        }
+    }
+
+    pub fn resetTitle(
+        target: apprt.Target,
+        value: apprt.action.PromptTitle,
+    ) bool {
+        switch (value) {
+            .surface => {
+                switch (target) {
+                    .app => return false,
+                    .surface => |core| {
+                        core.rt_surface.surface.setTitleOverride(null);
+                        return true;
+                    },
+                }
+            },
+            .tab => {
+                switch (target) {
+                    .app => return false,
+                    .surface => |core| {
+                        const surface = core.rt_surface.surface;
+                        const tab = ext.getAncestor(
+                            Tab,
+                            surface.as(gtk.Widget),
+                        ) orelse {
+                            log.warn("surface is not in a tab, ignoring reset_tab_title", .{});
+                            return false;
+                        };
+                        tab.setTitleOverride(null);
+                        return true;
+                    },
+                }
+            },
+            .window => {
+                switch (target) {
+                    .app => return false,
+                    .surface => |core| {
+                        const surface = core.rt_surface.surface;
+                        const window = ext.getAncestor(
+                            Window,
+                            surface.as(gtk.Widget),
+                        ) orelse {
+                            log.warn("surface is not in a window, ignoring reset_window_title", .{});
+                            return false;
+                        };
+                        window.setTitleOverride(null);
+                        return true;
+                    },
+                }
             },
         }
     }

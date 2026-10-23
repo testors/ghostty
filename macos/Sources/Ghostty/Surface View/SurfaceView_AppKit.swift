@@ -622,6 +622,22 @@ extension Ghostty {
             }
         }
 
+        /// Whether the title was manually overridden by the user.
+        var isTitleOverridden: Bool {
+            titleFromTerminal != nil
+        }
+
+        /// Reset the title to the title set by the terminal.
+        func resetTitle() {
+            let prevTitle = titleFromTerminal ?? "👻"
+            titleFromTerminal = nil
+            setTitle(prevTitle)
+        }
+
+        @IBAction func resetTitle(_ sender: Any) {
+            resetTitle()
+        }
+
         func setTitle(_ title: String) {
             // This fixes an issue where very quick changes to the title could
             // cause an unpleasant flickering. We set a timer so that we can
