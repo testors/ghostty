@@ -89,6 +89,10 @@ pub const StreamHandler = struct {
     /// to wake up the termio thread.
     termio_messaged: bool = false,
 
+    /// Whether parsed actions may require a terminal repaint. The caller
+    /// resets this before processing each batch of PTY output.
+    render_needed: bool = false,
+
     /// This is set to true when we've seen a title escape sequence. We use
     /// this to determine if we need to default the window title.
     seen_title: bool = false,
@@ -188,6 +192,11 @@ pub const StreamHandler = struct {
         comptime action: Stream.Action.Tag,
         value: Stream.Action.Value(action),
     ) void {
+        // Window titles are delivered through the surface mailbox and do
+        // not change the terminal display. Conservatively request a render
+        // for all other actions, including cursor and mode changes.
+        if (comptime action != .window_title) self.render_needed = true;
+
         self.vtFallible(action, value) catch |err| {
             log.warn("error handling VT action action={} err={}", .{ action, err });
         };
@@ -1936,9 +1945,8 @@ pub const StreamHandler = struct {
             });
         }
 
-        // Note: we don't have to do a queueRender here because every
-        // processed stream will queue a render once it is done processing
-        // the read() syscall.
+        // The color_operation action requests a render after this batch
+        // of PTY output has been processed.
     }
 
     /// Display a GUI progress report.

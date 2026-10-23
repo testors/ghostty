@@ -704,26 +704,9 @@ pub fn processOutput(self: *Termio, buf: []const u8) void {
 
 /// Process output from readdata but the lock is already held.
 fn processOutputLocked(self: *Termio, buf: []const u8) void {
-    // Schedule a render. We can call this first because we have the lock.
-    self.terminal_stream.handler.queueRender() catch unreachable;
-
-    // Whenever a character is typed, we ensure the cursor is in the
-    // non-blink state so it is rendered if visible. If we're under
-    // HEAVY read load, we don't want to send a ton of these so we
-    // use a timer under the covers
-    const now = std.Io.Timestamp.now(global.io(), .awake);
-    cursor_reset: {
-        if (self.last_cursor_reset) |last| {
-            if (last.durationTo(now).toMilliseconds() <= 500) {
-                break :cursor_reset;
-            }
-        }
-
-        self.last_cursor_reset = now;
-        _ = self.renderer_mailbox.push(global.io(), .{
-            .reset_cursor_blink = {},
-        }, .{ .instant = {} });
-    }
+    // Decide whether to render from the parsed actions. An active inspector
+    // also needs updates for its PTY trace, even for title-only output.
+    self.terminal_stream.handler.render_needed = self.renderer_state.inspector != null;
 
     // If we have an inspector, we enter SLOW MODE because we need to
     // process a byte at a time alternating between the inspector handler
@@ -743,6 +726,26 @@ fn processOutputLocked(self: *Termio, buf: []const u8) void {
         }
     } else {
         self.terminal_stream.nextSlice(buf);
+    }
+
+    if (self.terminal_stream.handler.render_needed) {
+        // Keep the cursor visible during terminal output, throttling resets
+        // under heavy read load. Title-only output must not reset blinking.
+        const now = std.Io.Timestamp.now(global.io(), .awake);
+        cursor_reset: {
+            if (self.last_cursor_reset) |last| {
+                if (last.durationTo(now).toMilliseconds() <= 500) {
+                    break :cursor_reset;
+                }
+            }
+
+            self.last_cursor_reset = now;
+            _ = self.renderer_mailbox.push(global.io(), .{
+                .reset_cursor_blink = {},
+            }, .{ .instant = {} });
+        }
+
+        self.terminal_stream.handler.queueRender() catch unreachable;
     }
 
     // If our stream handling caused messages to be sent to the mailbox
@@ -848,4 +851,126 @@ pub const ThreadData = struct {
 /// not available on a particular platform.
 pub fn getProcessInfo(self: *Termio, comptime info: ProcessInfo) ?ProcessInfo.Type(info) {
     return self.backend.getProcessInfo(info);
+}
+
+test "processOutput title-only updates do not wake the renderer" {
+    const testing = std.testing;
+    const App = @import("../App.zig");
+    const Inspector = @import("../inspector/main.zig").Inspector;
+    if (apprt.runtime != apprt.none) return error.SkipZigTest;
+
+    var loop = try xev.Loop.init(.{});
+    defer loop.deinit();
+    var wakeup = try xev.Async.init();
+    defer wakeup.deinit();
+
+    var woke: bool = false;
+    var completion: xev.Completion = .{};
+    wakeup.wait(&loop, &completion, bool, &woke, (struct {
+        fn callback(
+            result: ?*bool,
+            _: *xev.Loop,
+            _: *xev.Completion,
+            r: xev.Async.WaitError!void,
+        ) xev.CallbackAction {
+            _ = r catch unreachable;
+            result.?.* = true;
+            return .rearm;
+        }
+    }).callback);
+    try loop.run(.no_wait);
+
+    var rt_app: apprt.App = .{};
+    var app_mailbox: App.Mailbox.Queue = .{};
+    var renderer_mailbox: renderer.Thread.Mailbox = .{};
+    var mutex: std.Io.Mutex = .init;
+    var t: Termio = undefined;
+    var state: renderer.State = .{ .mutex = &mutex, .terminal = &t.terminal };
+    t.alloc = testing.allocator;
+    t.terminal = try .init(global.io(), testing.allocator, .{ .cols = 80, .rows = 24 });
+    defer t.terminal.deinit(testing.allocator);
+    t.renderer_state = &state;
+    t.renderer_mailbox = &renderer_mailbox;
+    t.mailbox = try .initSPSC(testing.allocator);
+    defer t.mailbox.deinit(testing.allocator);
+    t.terminal_stream = .init(.{
+        .allocator = testing.allocator,
+        .handler = .{
+            .alloc = testing.allocator,
+            .size = &t.size,
+            .terminal = &t.terminal,
+            .termio_mailbox = &t.mailbox,
+            .surface_mailbox = .{
+                .surface = undefined,
+                .app = .{ .rt_app = &rt_app, .mailbox = &app_mailbox },
+            },
+            .renderer_state = &state,
+            .renderer_mailbox = &renderer_mailbox,
+            .renderer_wakeup = wakeup,
+            .enquiry_response = "",
+            .osc_color_report_format = .@"16-bit",
+            .clipboard_write = .deny,
+            .clipboard_write_limit = 1024,
+            .xt_checksum_report = false,
+        },
+    });
+    defer t.terminal_stream.deinit();
+
+    var inspector = try Inspector.init(testing.allocator);
+    defer inspector.deinit(testing.allocator);
+    const Case = struct {
+        input: []const u8,
+        render: bool = false,
+        title: ?[]const u8 = null,
+        inspect: bool = false,
+    };
+    const cases = [_]Case{
+        .{ .input = "\x1b]2;spinner 1\x07", .title = "spinner 1" },
+        .{ .input = "\x1b]0;spinner 2\x1b\\", .title = "spinner 2" },
+        // A title can span multiple PTY reads, including its ST terminator.
+        .{ .input = "\x1b]" },
+        .{ .input = "2;작업 중" },
+        .{ .input = "\x1b", .title = "작업 중" },
+        .{ .input = "\\" },
+        .{ .input = "text\x1b]2;before\x07", .render = true, .title = "before" },
+        .{ .input = "\x1b]2;after\x07text", .render = true, .title = "after" },
+        // A title-only read must not inherit the previous read's render request.
+        .{ .input = "\x1b]2;spinner 3\x07", .title = "spinner 3" },
+        .{ .input = "\x1b]2;\x07", .title = "" },
+        .{ .input = "plain text", .render = true },
+        .{ .input = "\x1b[2J", .render = true },
+        .{ .input = "\x1b[H", .render = true },
+        .{ .input = "\x1b[?25l", .render = true },
+        .{ .input = "\x1b]11;#123456\x07", .render = true },
+        // Inspector traces still need refreshing, even for title-only output.
+        .{ .input = "\x1b]2;inspected\x07", .render = true, .title = "inspected", .inspect = true },
+    };
+    for (cases) |case| {
+        errdefer std.debug.print("failed PTY input: {any}\n", .{case.input});
+        woke = false;
+        t.last_cursor_reset = null;
+        state.inspector = if (case.inspect) &inspector else null;
+        t.processOutput(case.input);
+        try loop.run(.no_wait);
+        try testing.expectEqual(case.render, woke);
+        try testing.expectEqual(case.render, t.last_cursor_reset != null);
+        if (case.render) {
+            const msg = renderer_mailbox.pop(global.io());
+            try testing.expect(msg != null);
+            try testing.expect(msg.? == .reset_cursor_blink);
+        }
+        try testing.expect(renderer_mailbox.pop(global.io()) == null);
+
+        if (case.title) |title| {
+            try testing.expectEqualStrings(title, t.terminal.getTitle() orelse "");
+            const msg = app_mailbox.pop(global.io());
+            try testing.expect(msg != null);
+            try testing.expect(msg.? == .surface_message);
+            const surface_msg = msg.?.surface_message.message;
+            try testing.expect(surface_msg == .set_title);
+            try testing.expectEqualStrings(title, std.mem.sliceTo(&surface_msg.set_title, 0));
+        }
+        // Color changes can also send surface messages; keep the queue drained.
+        while (app_mailbox.pop(global.io())) |_| {}
+    }
 }
