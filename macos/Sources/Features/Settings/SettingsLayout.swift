@@ -172,6 +172,7 @@ enum SettingsLayout {
                 Section(title: "Titlebar", keys: [
                     "macos-titlebar-style",
                     "macos-titlebar-proxy-icon",
+                    "macos-titlebar-remote-indicator",
                     "macos-window-buttons",
                 ]),
                 Section(title: "Keyboard", keys: [

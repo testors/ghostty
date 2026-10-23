@@ -57,6 +57,22 @@ pub const Message = union(enum) {
         }
     };
 
+    /// Whether the terminal is connected to another machine. Sent when
+    /// it changes.
+    pub const RemoteSession = struct {
+        /// The program connecting the terminal to another machine ("ssh",
+        /// "mosh", ...) or empty when the terminal is local.
+        program: [15:0]u8,
+
+        pub fn init(program: []const u8) RemoteSession {
+            var result: RemoteSession = .{ .program = undefined };
+            const len = @min(program.len, result.program.len);
+            @memcpy(result.program[0..len], program[0..len]);
+            result.program[len] = 0;
+            return result;
+        }
+    };
+
     /// Set the title of the surface.
     /// TODO: we should change this to a "WriteReq" style structure in
     /// the termio message so that we can more efficiently send strings
@@ -108,6 +124,9 @@ pub const Message = union(enum) {
 
     /// Show a desktop notification.
     desktop_notification: DesktopNotification,
+
+    /// The terminal connected to or disconnected from another machine.
+    remote_session: RemoteSession,
 
     /// Health status change for the renderer.
     renderer_health: renderer.Health,

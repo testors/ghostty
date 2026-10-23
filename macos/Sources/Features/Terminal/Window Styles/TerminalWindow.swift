@@ -25,6 +25,9 @@ class TerminalWindow: NSWindow {
     /// Update notification UI in titlebar
     private let updateAccessory = NSTitlebarAccessoryViewController()
 
+    /// Shown in the titlebar when the focused terminal is remote
+    private let remoteAccessory = NSTitlebarAccessoryViewController()
+
     /// Drop targets use public titlebar/tab accessories instead of replacing native tab views.
     private let surfaceDropAccessory = NSTitlebarAccessoryViewController()
     private lazy var titlebarSurfaceDropView = TerminalTabDropView(targetWindow: self)
@@ -62,6 +65,18 @@ class TerminalWindow: NSWindow {
     /// Gets the terminal controller from the window controller.
     var terminalController: TerminalController? {
         windowController as? TerminalController
+    }
+
+    /// Set when the focused terminal is connected to another machine.
+    /// Shown as a dimmed icon in the titlebar and in this window's tab.
+    var remoteSession: Ghostty.RemoteSession? {
+        didSet {
+            guard remoteSession != oldValue else { return }
+            remoteTabIcon.isHidden = remoteSession == nil
+            remoteTabIcon.toolTip = remoteSession?.description
+            remoteTabIcon.setAccessibilityLabel(remoteSession?.description)
+            viewModel.remoteSession = remoteSession
+        }
     }
 
     /// The color assigned to this window's tab. Setting this updates the tab color indicator
@@ -162,6 +177,14 @@ class TerminalWindow: NSWindow {
                 ))
                 addTitlebarAccessoryViewController(updateAccessory)
                 updateAccessory.view.translatesAutoresizingMaskIntoConstraints = false
+
+                // Styles with tabs in the titlebar show the tab icon only.
+                remoteAccessory.layoutAttribute = .right
+                remoteAccessory.view = NonDraggableHostingView(rootView: RemoteSessionAccessoryView(
+                    viewModel: viewModel
+                ))
+                addTitlebarAccessoryViewController(remoteAccessory)
+                remoteAccessory.view.translatesAutoresizingMaskIntoConstraints = false
             }
         }
 
@@ -177,6 +200,7 @@ class TerminalWindow: NSWindow {
         stackView.alignment = .centerY
         stackView.addArrangedSubview(tabSurfaceDropView)
         stackView.addArrangedSubview(tabColorIndicator)
+        stackView.addArrangedSubview(remoteTabIcon)
         stackView.addArrangedSubview(keyEquivalentLabel)
         stackView.addArrangedSubview(resetZoomTabButton)
         tab.accessoryView = stackView
@@ -223,11 +247,13 @@ class TerminalWindow: NSWindow {
     override func becomeKey() {
         super.becomeKey()
         resetZoomTabButton.contentTintColor = .controlAccentColor
+        remoteTabIcon.contentTintColor = .labelColor
     }
 
     override func resignKey() {
         super.resignKey()
         resetZoomTabButton.contentTintColor = .secondaryLabelColor
+        remoteTabIcon.contentTintColor = .secondaryLabelColor
         tabTitleEditor.finishEditing(commit: true)
     }
 
@@ -362,6 +388,17 @@ class TerminalWindow: NSWindow {
                 ])
         }
     }
+
+    /// Shown in the tab when the focused terminal is connected to another machine.
+    private lazy var remoteTabIcon: NSImageView = {
+        let view = NSImageView()
+        view.image = NSImage(systemSymbolName: "network", accessibilityDescription: nil)
+        view.symbolConfiguration = .init(pointSize: NSFont.smallSystemFontSize, weight: .regular)
+        view.contentTintColor = isKeyWindow ? .labelColor : .secondaryLabelColor
+        view.isHidden = true
+        view.setContentCompressionResistancePriority(.windowSizeStayPut, for: .horizontal)
+        return view
+    }()
 
     /// The label that has the key equivalent for tab views.
     private lazy var keyEquivalentLabel: NSTextField = {
@@ -717,6 +754,7 @@ extension TerminalWindow {
         @Published var isSurfaceZoomed: Bool = false
         @Published var hasToolbar: Bool = false
         @Published var isMainWindow: Bool = true
+        @Published var remoteSession: Ghostty.RemoteSession?
 
         /// Calculates the top padding based on toolbar visibility and macOS version
         fileprivate var accessoryTopPadding: CGFloat {
@@ -748,6 +786,29 @@ extension TerminalWindow {
                 // to properly align.
                 .padding(.top, viewModel.accessoryTopPadding)
                 // We always need space at the end of the titlebar
+                .padding(.trailing, 10)
+            }
+        }
+    }
+
+    /// A dimmed icon shown when the focused terminal is connected to
+    /// another machine.
+    struct RemoteSessionAccessoryView: View {
+        @ObservedObject var viewModel: ViewModel
+
+        var body: some View {
+            if let session = viewModel.remoteSession {
+                VStack {
+                    Image(systemName: "network")
+                        .font(.system(size: NSFont.smallSystemFontSize))
+                        .foregroundColor(.secondary)
+                        .opacity(viewModel.isMainWindow ? 1 : 0.7)
+                        .help(session.description)
+                        .accessibilityLabel(session.description)
+                    Spacer()
+                }
+                // Center on the title like the other accessories.
+                .padding(.top, viewModel.accessoryTopPadding + 3)
                 .padding(.trailing, 10)
             }
         }

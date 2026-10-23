@@ -21,6 +21,7 @@ const internal_os = @import("../os/main.zig");
 const windows = internal_os.windows;
 const configpkg = @import("../config.zig");
 const ProcessInfo = @import("../pty.zig").ProcessInfo;
+const remote = @import("remote.zig");
 const compat_file = @import("../lib/compat/file.zig");
 
 const log = std.log.scoped(.io_exec);
@@ -72,6 +73,10 @@ last_cursor_reset: ?std.Io.Timestamp = null,
 /// State we have for thread enter. This may be null if we don't need
 /// to keep track of any state or if its already been freed.
 thread_enter_state: ?*ThreadEnterState = null,
+
+/// The remote client (ssh, mosh, ...) last reported to the surface. Only
+/// the read thread uses this; see checkRemote.
+remote_program: ?remote.Program = null,
 
 /// The state we need to keep around only until we enter the IO
 /// thread. Then we can throw it all away.
@@ -845,6 +850,23 @@ pub const ThreadData = struct {
         self.* = undefined;
     }
 };
+
+/// Tell the surface when the terminal connects to another machine or
+/// becomes local again. That is the case while a remote client (ssh, mosh,
+/// ...) is in the foreground of the pty.
+///
+/// The read thread calls this each time it has processed all pending pty
+/// output. A program that takes over the terminal prints something, and so
+/// does the shell when it gets the terminal back, so once that output has
+/// been processed the foreground process group is in its new state.
+pub fn checkRemote(self: *Termio) void {
+    const program = remote.foreground(self.backend.getProcessInfo(.foreground_pid));
+    if (program == self.remote_program) return;
+    self.remote_program = program;
+    _ = self.surface_mailbox.push(.{ .remote_session = .init(
+        if (program) |p| p.name() else "",
+    ) }, .{ .forever = {} });
+}
 
 /// Get information about the process(es) attached to the backend. Returns
 /// `null` if there was an error getting the information or the information is

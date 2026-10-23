@@ -3496,6 +3496,27 @@ keybind: Keybinds = .{},
 /// editor, etc.
 @"macos-titlebar-proxy-icon": MacTitlebarProxyIcon = .visible,
 
+/// Whether to show that a terminal is connected to another machine with
+/// ssh, mosh, Eternal Terminal or telnet. A dimmed icon is shown on the
+/// right side of the titlebar and in the tabs of such terminals.
+///
+/// The connection is detected from the program running in the foreground
+/// of the terminal, so a remote client started inside a local terminal
+/// multiplexer such as tmux isn't detected. The remote host isn't shown
+/// because it can't be known reliably: the remote client may have
+/// connected onwards to other hosts.
+///
+/// The titlebar icon is only shown with the `native` and `transparent`
+/// titlebar styles. The tab icon is shown with every style that has tabs.
+///
+/// Valid values are:
+///
+///   * `visible` - Show the indicator.
+///   * `hidden` - Don't show the indicator.
+///
+/// The default value is `visible`.
+@"macos-titlebar-remote-indicator": MacTitlebarRemoteIndicator = .visible,
+
 /// Controls the windowing behavior when dropping a file or folder
 /// onto the Ghostty icon in the macOS dock.
 ///
@@ -9352,6 +9373,12 @@ pub const MacTitlebarStyle = enum {
 
 /// See macos-titlebar-proxy-icon
 pub const MacTitlebarProxyIcon = enum {
+    visible,
+    hidden,
+};
+
+/// See macos-titlebar-remote-indicator
+pub const MacTitlebarRemoteIndicator = enum {
     visible,
     hidden,
 };

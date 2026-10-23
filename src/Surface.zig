@@ -1120,6 +1120,15 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
             },
         },
 
+        .remote_session => |v| {
+            const program = std.mem.sliceTo(&v.program, 0);
+            _ = try self.rt_app.performAction(
+                .{ .surface = self },
+                .remote_session,
+                .{ .active = program.len > 0, .program = program },
+            );
+        },
+
         .pwd_change => |w| {
             defer w.deinit();
 

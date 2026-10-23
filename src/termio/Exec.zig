@@ -1494,11 +1494,12 @@ pub const ReadThread = struct {
             // the tail below, so it is safe to read outside the lock.
             io.processOutput(batch);
 
-            {
+            const caught_up = caught_up: {
                 pipeline.mutex.lockUncancelable(global.io());
                 pipeline.tail = (pipeline.tail + 1) % buffer_count;
                 pipeline.count -= 1;
-                const wake = pipeline.count == 0 and
+                const caught_up = pipeline.count == 0;
+                const wake = caught_up and
                     pipeline.bridging and
                     pipeline.idle_write_fd >= 0;
                 pipeline.mutex.unlock(global.io());
@@ -1511,7 +1512,13 @@ pub const ReadThread = struct {
                 if (wake) {
                     _ = posix.system.write(pipeline.idle_write_fd, "i", 1);
                 }
-            }
+
+                break :caught_up caught_up;
+            };
+
+            // All pending output is processed, so see whether a remote
+            // client took over the terminal or gave it back.
+            if (caught_up) io.checkRemote();
 
             // Batch boundary: hand the renderer state mutex off if
             // the renderer is waiting. See renderer.State.lockDemand.
@@ -1804,6 +1811,7 @@ pub const ReadThread = struct {
                 }
 
                 @call(.always_inline, termio.Termio.processOutput, .{ io, buf[0..n] });
+                io.checkRemote();
 
                 // See threadMainPosix: hand the renderer state mutex
                 // off if the renderer is waiting, since this loop

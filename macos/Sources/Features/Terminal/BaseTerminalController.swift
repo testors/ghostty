@@ -641,6 +641,9 @@ class BaseTerminalController: NSWindowController,
 
         // Update our derived config
         self.derivedConfig = DerivedConfig(config)
+
+        // The remote indicator may have been turned on or off.
+        remoteSessionDidChange(to: focusedSurface?.remoteSession)
     }
 
     @objc private func ghosttyCommandPaletteDidToggle(_ notification: Notification) {
@@ -901,6 +904,11 @@ class BaseTerminalController: NSWindowController,
                 }
                 .sink { [weak self] in self?.titleDidChange(to: $0) }
                 .store(in: &focusedSurfaceCancellables)
+
+            titleSurface.$remoteSession
+                .removeDuplicates()
+                .sink { [weak self] in self?.remoteSessionDidChange(to: $0) }
+                .store(in: &focusedSurfaceCancellables)
         } else {
             // There is no surface to listen to titles for.
             titleDidChange(to: "👻")
@@ -1022,6 +1030,12 @@ class BaseTerminalController: NSWindowController,
         }
 
         window.title = lastComputedTitle
+    }
+
+    /// The focused surface connected to or disconnected from another machine.
+    func remoteSessionDidChange(to session: Ghostty.RemoteSession?) {
+        guard let window = window as? TerminalWindow else { return }
+        window.remoteSession = derivedConfig.macosTitlebarRemoteIndicator == .visible ? session : nil
     }
 
     func pwdDidChange(to: URL?) {
@@ -1578,12 +1592,14 @@ class BaseTerminalController: NSWindowController,
 
     private struct DerivedConfig {
         let macosTitlebarProxyIcon: Ghostty.MacOSTitlebarProxyIcon
+        let macosTitlebarRemoteIndicator: Ghostty.MacOSTitlebarRemoteIndicator
         let windowStepResize: Bool
         let focusFollowsMouse: Bool
         let splitPreserveZoom: Ghostty.Config.SplitPreserveZoom
 
         init() {
             self.macosTitlebarProxyIcon = .visible
+            self.macosTitlebarRemoteIndicator = .visible
             self.windowStepResize = false
             self.focusFollowsMouse = false
             self.splitPreserveZoom = .init()
@@ -1591,6 +1607,7 @@ class BaseTerminalController: NSWindowController,
 
         init(_ config: Ghostty.Config) {
             self.macosTitlebarProxyIcon = config.macosTitlebarProxyIcon
+            self.macosTitlebarRemoteIndicator = config.macosTitlebarRemoteIndicator
             self.windowStepResize = config.windowStepResize
             self.focusFollowsMouse = config.focusFollowsMouse
             self.splitPreserveZoom = config.splitPreserveZoom

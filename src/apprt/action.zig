@@ -371,6 +371,11 @@ pub const Action = union(Key) {
     /// Open the settings UI.
     open_settings,
 
+    /// The terminal connected to or disconnected from another machine
+    /// (ssh, mosh, ...). Apprts can use this to show that input goes to a
+    /// remote host.
+    remote_session: RemoteSession,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -445,6 +450,7 @@ pub const Action = union(Key) {
         resize_window,
         reset_title,
         open_settings,
+        remote_session,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
@@ -804,6 +810,41 @@ pub const Pwd = struct {
         writer: *std.Io.Writer,
     ) !void {
         try writer.print("{s}{{ {s} }}", .{ @typeName(@This()), value.pwd });
+    }
+};
+
+pub const RemoteSession = struct {
+    /// False when the terminal is local.
+    active: bool,
+
+    /// The program connecting the terminal to another machine ("ssh",
+    /// "mosh", "et", "telnet") or empty when the terminal is local.
+    program: [:0]const u8,
+
+    // Sync with: ghostty_action_remote_session_s
+    pub const C = extern struct {
+        active: bool,
+        program: [*:0]const u8,
+    };
+
+    pub fn cval(self: RemoteSession) C {
+        return .{
+            .active = self.active,
+            .program = self.program.ptr,
+        };
+    }
+
+    pub fn format(
+        value: @This(),
+        comptime _: []const u8,
+        _: std.fmt.Options,
+        writer: *std.Io.Writer,
+    ) !void {
+        try writer.print("{s}{{ active={} program={s} }}", .{
+            @typeName(@This()),
+            value.active,
+            value.program,
+        });
     }
 };
 

@@ -277,6 +277,24 @@ extension Ghostty {
         case hidden
     }
 
+    /// Enum for the macos-titlebar-remote-indicator config option
+    enum MacOSTitlebarRemoteIndicator: String {
+        case visible
+        case hidden
+    }
+
+    /// A terminal connected to another machine (ssh, mosh, ...).
+    struct RemoteSession: Equatable {
+        /// The program connecting the terminal ("ssh", "mosh", ...).
+        let program: String
+
+        var description: String {
+            program.isEmpty
+                ? "Connected to another machine"
+                : "Connected to another machine with \(program)"
+        }
+    }
+
     /// Enum for auto-update-channel config option
     enum AutoUpdateChannel: String {
         case tip

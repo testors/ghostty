@@ -673,6 +673,9 @@ extension Ghostty {
             case GHOSTTY_ACTION_PWD:
                 pwdChanged(app, target: target, v: action.action.pwd)
 
+            case GHOSTTY_ACTION_REMOTE_SESSION:
+                remoteSessionChanged(app, target: target, v: action.action.remote_session)
+
             case GHOSTTY_ACTION_OPEN_CONFIG:
                 openConfig(app)
 
@@ -2029,6 +2032,24 @@ extension Ghostty {
             default:
                 assertionFailure()
             }
+        }
+
+        private static func remoteSessionChanged(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s,
+            v: ghostty_action_remote_session_s) {
+            guard target.tag == GHOSTTY_TARGET_SURFACE,
+                  let surface = target.target.surface,
+                  let surfaceView = self.surfaceView(from: surface) else { return }
+
+            guard v.active else {
+                surfaceView.remoteSession = nil
+                return
+            }
+
+            surfaceView.remoteSession = RemoteSession(
+                program: v.program.map { String(cString: $0) } ?? ""
+            )
         }
 
         private static func setMouseShape(
