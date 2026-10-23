@@ -290,6 +290,7 @@ fn categoryOf(comptime key: []const u8) Category {
         .{ "clipboard-codepoint-map", .mouse },
 
         .{ "grapheme-width-method", .terminal },
+        .{ "normalize-output-nfc", .terminal },
         .{ "scroll-to-bottom", .terminal },
         .{ "title-report", .terminal },
         .{ "image-storage-limit", .terminal },
@@ -401,6 +402,7 @@ fn applyOf(comptime key: []const u8) Apply {
         "abnormal-command-exit-runtime",
         "font-codepoint-map",
         "grapheme-width-method",
+        "normalize-output-nfc",
         "scrollback-limit-bytes",
         "scrollback-limit-lines",
         "window-padding-x",
@@ -669,6 +671,8 @@ test "classification" {
     try testing.expectEqual(Category.macos, get("macos-titlebar-style").?.category);
     try testing.expectEqual(Category.font, get("adjust-cell-height").?.category);
     try testing.expectEqual(Category.window, get("tab-title-format").?.category);
+    try testing.expectEqual(Category.terminal, get("normalize-output-nfc").?.category);
+    try testing.expectEqual(Apply.new_terminal, get("normalize-output-nfc").?.apply);
     try testing.expectEqual(Apply.new_window, get("macos-titlebar-style").?.apply);
     try testing.expectEqual(Platform.linux, get("gtk-wide-tabs").?.platform);
     try testing.expect(get("nope") == null);
