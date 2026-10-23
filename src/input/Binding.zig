@@ -724,6 +724,13 @@ pub const Action = union(enum) {
     ///   since 1.4.0.)
     open_config: OpenConfig,
 
+    /// Open the settings window, where settings can be changed without
+    /// editing the configuration file by hand. Changes are written to
+    /// the configuration file. Use `open_config` to edit the file itself.
+    ///
+    /// Available since: 1.4.0
+    open_settings,
+
     /// Reload the configuration.
     ///
     /// The exact meaning depends on the app runtime in use, but this usually
@@ -1374,6 +1381,7 @@ pub const Action = union(enum) {
 
             // Obviously app actions.
             .open_config,
+            .open_settings,
             .reload_config,
             .close_all_windows,
             .quit,

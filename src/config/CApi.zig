@@ -5,8 +5,10 @@ const global = @import("../global.zig");
 const String = @import("../main_c.zig").String;
 
 const Config = @import("Config.zig");
+const Editor = @import("Editor.zig");
 const c_get = @import("c_get.zig");
 const edit = @import("edit.zig");
+const schema = @import("schema.zig");
 const Key = @import("key.zig").Key;
 
 const log = std.log.scoped(.config);
@@ -141,6 +143,212 @@ export fn ghostty_config_open_path() String {
     return .fromSlice(path);
 }
 
+// Settings editor API. Every function that changes settings returns an
+// empty string on success or a message explaining the failure. Returned
+// strings must be freed with ghostty_string_free.
+
+/// The schema of every configuration key for this platform, as JSON.
+/// See schema.zig for the format.
+export fn ghostty_config_schema_json() String {
+    var buf: std.Io.Writer.Allocating = .init(global.alloc());
+    defer buf.deinit();
+    schema.writeJson(global.alloc(), &buf.writer) catch |err| {
+        log.err("error writing config schema err={}", .{err});
+        return .empty;
+    };
+
+    return ownedString(buf.written());
+}
+
+/// Keybinding actions and their titles, as JSON.
+export fn ghostty_config_keybind_actions_json() String {
+    var buf: std.Io.Writer.Allocating = .init(global.alloc());
+    defer buf.deinit();
+    schema.writeKeybindActionsJson(&buf.writer) catch |err| {
+        log.err("error writing keybind actions err={}", .{err});
+        return .empty;
+    };
+
+    return ownedString(buf.written());
+}
+
+/// Every available theme with its colors, as JSON.
+export fn ghostty_config_themes_json() String {
+    var buf: std.Io.Writer.Allocating = .init(global.alloc());
+    defer buf.deinit();
+    Editor.writeThemesJson(global.alloc(), &buf.writer) catch |err| {
+        log.err("error listing themes err={}", .{err});
+        return .empty;
+    };
+
+    return ownedString(buf.written());
+}
+
+/// Create a settings editor. If path is non-null, only that file is
+/// loaded (and new settings are written to it), otherwise the default
+/// configuration files are used. dark selects the dark variant of
+/// light/dark themes.
+export fn ghostty_config_editor_new(
+    path: ?[*:0]const u8,
+    cli_args: bool,
+    dark: bool,
+) ?*Editor {
+    return Editor.create(global.alloc(), .{
+        .path = if (path) |p| std.mem.span(p) else null,
+        .cli_args = cli_args,
+        .theme = if (dark) .dark else .light,
+    }) catch |err| {
+        log.err("error creating config editor err={}", .{err});
+        return null;
+    };
+}
+
+export fn ghostty_config_editor_free(ptr: ?*Editor) void {
+    if (ptr) |v| v.destroy();
+}
+
+export fn ghostty_config_editor_reload(self: *Editor) String {
+    self.reload() catch |err| return editorError(self, err);
+    return .empty;
+}
+
+export fn ghostty_config_editor_set_dark(self: *Editor, dark: bool) String {
+    self.setTheme(if (dark) .dark else .light) catch |err| return editorError(self, err);
+    return .empty;
+}
+
+/// The current state (values, where they're set, errors) as JSON.
+export fn ghostty_config_editor_snapshot_json(self: *Editor) String {
+    var buf: std.Io.Writer.Allocating = .init(global.alloc());
+    defer buf.deinit();
+    self.writeSnapshotJson(&buf.writer) catch |err| {
+        log.err("error writing config editor snapshot err={}", .{err});
+        return .empty;
+    };
+
+    return ownedString(buf.written());
+}
+
+/// Returns an empty string if the value is valid for the key.
+export fn ghostty_config_editor_validate(
+    self: *Editor,
+    key: [*:0]const u8,
+    value: [*:0]const u8,
+) String {
+    var arena: std.heap.ArenaAllocator = .init(global.alloc());
+    defer arena.deinit();
+    const msg = self.validate(
+        arena.allocator(),
+        std.mem.span(key),
+        std.mem.span(value),
+    ) catch |err| return errorString(err);
+    return if (msg) |m| ownedString(m) else .empty;
+}
+
+export fn ghostty_config_editor_set(
+    self: *Editor,
+    key: [*:0]const u8,
+    value: [*:0]const u8,
+) String {
+    self.set(std.mem.span(key), std.mem.span(value)) catch |err|
+        return editorError(self, err);
+    return .empty;
+}
+
+export fn ghostty_config_editor_set_list(
+    self: *Editor,
+    key: [*:0]const u8,
+    values: [*]const [*:0]const u8,
+    count: usize,
+) String {
+    var arena: std.heap.ArenaAllocator = .init(global.alloc());
+    defer arena.deinit();
+    const list = arena.allocator().alloc([]const u8, count) catch |err|
+        return errorString(err);
+    for (list, 0..) |*v, i| v.* = std.mem.span(values[i]);
+    self.setList(std.mem.span(key), list) catch |err| return editorError(self, err);
+    return .empty;
+}
+
+export fn ghostty_config_editor_add(
+    self: *Editor,
+    key: [*:0]const u8,
+    value: [*:0]const u8,
+) String {
+    self.add(std.mem.span(key), std.mem.span(value)) catch |err|
+        return editorError(self, err);
+    return .empty;
+}
+
+export fn ghostty_config_editor_replace_entry(
+    self: *Editor,
+    key: [*:0]const u8,
+    path: [*:0]const u8,
+    line: usize,
+    value: [*:0]const u8,
+) String {
+    self.replaceEntry(
+        std.mem.span(key),
+        std.mem.span(path),
+        line,
+        std.mem.span(value),
+    ) catch |err| return editorError(self, err);
+    return .empty;
+}
+
+export fn ghostty_config_editor_remove_entry(
+    self: *Editor,
+    key: [*:0]const u8,
+    path: [*:0]const u8,
+    line: usize,
+) String {
+    self.removeEntry(std.mem.span(key), std.mem.span(path), line) catch |err|
+        return editorError(self, err);
+    return .empty;
+}
+
+export fn ghostty_config_editor_reset(self: *Editor, key: [*:0]const u8) String {
+    self.reset(std.mem.span(key)) catch |err| return editorError(self, err);
+    return .empty;
+}
+
+/// A finalized configuration with key = value applied on top of the
+/// current one, without writing anything. Free with ghostty_config_free.
+export fn ghostty_config_editor_preview(
+    self: *Editor,
+    key: [*:0]const u8,
+    value: [*:0]const u8,
+) ?*Config {
+    return self.preview(std.mem.span(key), std.mem.span(value)) catch |err| {
+        log.warn("error previewing config err={}", .{err});
+        return null;
+    };
+}
+
+fn ownedString(slice: []const u8) String {
+    const copy = global.alloc().dupeSentinel(u8, slice, 0) catch return .empty;
+    return .fromSlice(copy);
+}
+
+fn errorString(err: anyerror) String {
+    var buf: [128]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "error: {t}", .{err}) catch "error";
+    return ownedString(msg);
+}
+
+fn editorError(self: *Editor, err: anyerror) String {
+    const msg = self.lastMessage();
+    if (msg.len > 0 and (err == error.InvalidValue or
+        err == error.UnknownKey or
+        err == error.FileChanged))
+    {
+        return ownedString(msg);
+    }
+
+    log.warn("config editor error err={}", .{err});
+    return errorString(err);
+}
+
 /// Sync with ghostty_diagnostic_s
 const Diagnostic = extern struct {
     message: [*:0]const u8 = "",
@@ -252,9 +460,15 @@ test "ghostty_config_trigger: default keybind" {
 
     // Default commands should be fetchable through config_trigger_
     {
+        const trigger = try config_trigger_(&cfg, "open_settings");
+        try testing.expectEqual(.unicode, trigger.tag);
+        try testing.expectEqual(@as(u32, ','), trigger.key.unicode);
+    }
+    {
         const trigger = try config_trigger_(&cfg, "open_config");
         try testing.expectEqual(.unicode, trigger.tag);
         try testing.expectEqual(@as(u32, ','), trigger.key.unicode);
+        try testing.expect(trigger.mods.alt);
     }
     {
         const trigger = try config_trigger_(&cfg, "reload_config");

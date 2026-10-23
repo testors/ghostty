@@ -28,7 +28,7 @@ extension Ghostty {
         @Published private(set) var config: Config
 
         /// Preferred config file than the default ones
-        private var configPath: String?
+        private(set) var configPath: String?
         /// The ghostty app instance. We only have one of these for the entire app, although I guess
         /// in theory you can have multiple... I don't know why you would...
         @Published var app: ghostty_app_t? {
@@ -125,6 +125,11 @@ extension Ghostty {
             guard let app_ud = ghostty_app_userdata(app) else { return }
             let app = Unmanaged<App>.fromOpaque(app_ud).takeUnretainedValue()
             app.openConfig()
+        }
+
+        private static func openSettings(_ app: ghostty_app_t) {
+            guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return }
+            appDelegate.openSettings(nil)
         }
 
         func openConfig() {
@@ -670,6 +675,9 @@ extension Ghostty {
 
             case GHOSTTY_ACTION_OPEN_CONFIG:
                 openConfig(app)
+
+            case GHOSTTY_ACTION_OPEN_SETTINGS:
+                openSettings(app)
 
             case GHOSTTY_ACTION_FLOAT_WINDOW:
                 toggleFloatWindow(app, target: target, mode: action.action.float_window)

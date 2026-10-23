@@ -63,6 +63,17 @@ pub fn openPath(alloc_gpa: Allocator) ![:0]const u8 {
     return try alloc_gpa.dupeSentinel(u8, config_path.name, 0);
 }
 
+/// The path of the configuration file that settings should be written
+/// to. This is the same file that `openPath` opens but it isn't created
+/// if it doesn't exist. The returned value is allocated using the
+/// provided allocator.
+pub fn preferredPath(alloc_gpa: Allocator) ![]const u8 {
+    var arena = ArenaAllocator.init(alloc_gpa);
+    defer arena.deinit();
+    const result = try configPath(arena.allocator());
+    return try alloc_gpa.dupe(u8, result.name);
+}
+
 const ConfigPathResult = struct {
     name: []const u8,
     exists: bool,

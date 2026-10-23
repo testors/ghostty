@@ -8,6 +8,10 @@ pub const conditional = @import("config/conditional.zig");
 pub const io = @import("config/io.zig");
 pub const string = @import("config/string.zig");
 pub const edit = @import("config/edit.zig");
+pub const edit_file = @import("config/edit_file.zig");
+pub const Editor = @import("config/Editor.zig");
+pub const schema = @import("config/schema.zig");
+pub const Trace = @import("config/Trace.zig");
 pub const url = @import("config/url.zig");
 
 pub const ConditionalState = conditional.State;

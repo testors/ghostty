@@ -613,6 +613,12 @@ fn actionCommands(action: Action.Key) []const Command {
             },
         },
 
+        .open_settings => comptime &.{.{
+            .action = .open_settings,
+            .title = i18n.N_("Open Settings"),
+            .description = i18n.N_("Open the settings window."),
+        }},
+
         .reload_config => comptime &.{.{
             .action = .reload_config,
             .title = i18n.N_("Reload Config"),

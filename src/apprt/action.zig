@@ -368,6 +368,9 @@ pub const Action = union(Key) {
     /// The value specifies whether to reset the surface, tab, or window title.
     reset_title: PromptTitle,
 
+    /// Open the settings UI.
+    open_settings,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -441,6 +444,7 @@ pub const Action = union(Key) {
         move_tab_to_new_window,
         resize_window,
         reset_title,
+        open_settings,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
