@@ -1820,6 +1820,13 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             self.cells_rebuilt = false;
             self.images_rebuilt = false;
 
+            // If the draw fails from here on, the frame on screen no
+            // longer matches our state: the size, cells, or images
+            // changed but were never presented. Mark the cells rebuilt
+            // again so the next draw retries and the display link keeps
+            // running until it succeeds.
+            errdefer self.cells_rebuilt = true;
+
             // Wait for a frame to be available. We own the frame permit
             // until the frame is completed, so any error releases it.
             const frame = swap_chain.nextFrame();
