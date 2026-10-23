@@ -456,7 +456,13 @@ test "xt_checksum: wide characters" {
 }
 
 test "xt_checksum: combining marks" {
-    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 5 });
+    // NFC normalization would compose "e" + combining acute into "é",
+    // so disable it to keep the combining mark in the grid.
+    var t: Terminal = try .init(testing.io, testing.allocator, .{
+        .cols = 10,
+        .rows = 5,
+        .normalize_output_nfc = false,
+    });
     defer t.deinit(testing.allocator);
     const s = t.screens.active;
     t.modes.set(.grapheme_cluster, true);

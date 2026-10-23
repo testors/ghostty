@@ -515,6 +515,22 @@ language: ?[:0]const u8 = null,
 /// terminals. Only new terminals will use the new configuration.
 @"grapheme-width-method": GraphemeWidthMethod = .unicode,
 
+/// Normalize Unicode text to NFC (Normalization Form C) before storing it
+/// in the terminal grid.
+///
+/// macOS stores filenames in NFD (decomposed) form. For Hangul this means
+/// each syllable is represented as conjoining jamo, which many fonts
+/// (including D2Coding) do not contain. Normalizing to NFC lets the
+/// configured font render the text instead of falling back to a system
+/// font.
+///
+/// This changes the text stored in the terminal, so copying text will
+/// produce NFC. Set this to `false` to preserve the original codepoints.
+///
+/// This configuration can be changed at runtime but will not affect
+/// existing terminals. Only new terminals will use the new configuration.
+@"normalize-output-nfc": bool = true,
+
 /// FreeType load flags to enable. The format of this is a list of flags to
 /// enable separated by commas. If you prefix a flag with `no-` then it is
 /// disabled. If you omit a flag, its default value is used, so you must

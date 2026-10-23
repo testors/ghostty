@@ -83,6 +83,9 @@ previous_char: ?u21 = null,
 /// The modes that this terminal currently has active.
 modes: modespkg.ModeState = .{},
 
+/// Whether to normalize printed text to NFC before storing it.
+normalize_output_nfc: bool = true,
+
 /// Terminal-level cursor state.
 cursor: Cursor = .{},
 
@@ -297,6 +300,9 @@ pub const Options = struct {
     /// will revert back to this state.
     default_modes: modespkg.ModePacked = .{},
 
+    /// Whether to normalize printed text to NFC before storing it.
+    normalize_output_nfc: bool = true,
+
     /// Cursor state restored by DECSCUSR default, RIS and DECSTR.
     default_cursor_style: Screen.CursorStyle = .block,
     default_cursor_blink: ?bool = false,
@@ -362,6 +368,7 @@ pub fn init(
             .values = opts.default_modes,
             .default = opts.default_modes,
         },
+        .normalize_output_nfc = opts.normalize_output_nfc,
         .cursor = .{
             .default_style = opts.default_cursor_style,
             .default_blink = opts.default_cursor_blink,
@@ -534,7 +541,22 @@ pub fn setScrollbackMaxLines(self: *Terminal, max: ?usize) void {
 pub fn printString(self: *Terminal, str: []const u8) !void {
     const view = try std.unicode.Utf8View.init(str);
     var it = view.iterator();
-    while (it.nextCodepoint()) |cp| {
+
+    // Collect the codepoints so we can normalize the whole string. This
+    // is not a hot path; the PTY path goes through printSlice.
+    var cps: std.ArrayListUnmanaged(u21) = .empty;
+    defer cps.deinit(self.gpa());
+    while (it.nextCodepoint()) |cp| try cps.append(self.gpa(), cp);
+
+    var normalized_buf: ?[]u21 = null;
+    defer if (normalized_buf) |buf| self.gpa().free(buf);
+    const final: []const u21 = if (self.normalize_output_nfc and needsNfc(cps.items)) blk: {
+        const buf = try unicode.nfc.normalize(self.gpa(), cps.items);
+        normalized_buf = buf;
+        break :blk buf;
+    } else cps.items;
+
+    for (final) |cp| {
         switch (cp) {
             '\n' => {
                 self.carriageReturn();
@@ -586,7 +608,17 @@ pub fn printRepeat(self: *Terminal, count_req: usize) !void {
 /// grapheme clustering) are handled correctly but fall back to the
 /// slower per-codepoint path. They're less common and this is optimized
 /// for the aforementioned cases.
-pub fn printSlice(self: *Terminal, cps: []const u32) !void {
+pub fn printSlice(self: *Terminal, cps_in: []const u32) !void {
+    // Normalize to NFC if enabled. ASCII is already NFC, so skip the
+    // common case entirely.
+    var normalized_buf: ?[]u32 = null;
+    defer if (normalized_buf) |buf| self.gpa().free(buf);
+    const cps: []const u32 = if (self.normalize_output_nfc and needsNfc(cps_in)) blk: {
+        const buf = try unicode.nfc.normalizeU32(self.gpa(), cps_in);
+        normalized_buf = buf;
+        break :blk buf;
+    } else cps_in;
+
     // Check if we can do the fast path up front. If we can't
     // we need to go back to scalar `print`.
     const fast = fast: {
@@ -648,6 +680,15 @@ pub fn printSlice(self: *Terminal, cps: []const u32) !void {
         try self.print(@intCast(cps[i]));
         i += 1;
     }
+}
+
+/// Returns true if the codepoint slice contains any non-ASCII codepoint
+/// and therefore may need NFC normalization.
+fn needsNfc(cps: anytype) bool {
+    for (cps) |cp| {
+        if (cp >= 0x80) return true;
+    }
+    return false;
 }
 
 /// Attempt to print a prefix of `cps` using a batched fast path that
@@ -5473,6 +5514,24 @@ test "Terminal: print wide char" {
     }
 
     try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
+}
+
+test "Terminal: printSlice normalizes NFD Hangul to NFC" {
+    var t = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 80 });
+    defer t.deinit(testing.allocator);
+
+    // 무제 in NFD.
+    const nfd = [_]u32{ 0x1106, 0x116E, 0x110C, 0x1166 };
+    try t.printSlice(&nfd);
+
+    {
+        const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
+        try testing.expectEqual(@as(u21, 0xBB34), list_cell.cell.content.codepoint.data);
+    }
+    {
+        const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 2, .y = 0 } }).?;
+        try testing.expectEqual(@as(u21, 0xC81C), list_cell.cell.content.codepoint.data);
+    }
 }
 
 test "Terminal: print wide char at edge creates spacer head" {
@@ -15017,11 +15076,16 @@ fn testPrintSliceDifferential(
     var t1 = try init(io_impl, alloc, .{
         .cols = cols,
         .rows = rows,
+        // This test compares printSlice against per-codepoint print, so
+        // disable NFC normalization: normalization intentionally makes
+        // the two paths differ for non-NFC input.
+        .normalize_output_nfc = false,
     });
     defer t1.deinit(alloc);
     var t2 = try init(io_impl, alloc, .{
         .cols = cols,
         .rows = rows,
+        .normalize_output_nfc = false,
     });
     defer t2.deinit(alloc);
 

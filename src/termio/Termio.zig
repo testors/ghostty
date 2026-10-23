@@ -283,6 +283,7 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
             .max_scrollback_bytes = opts.full_config.@"scrollback-limit-bytes".optional(),
             .max_scrollback_lines = opts.full_config.@"scrollback-limit-lines".optional(),
             .default_modes = default_modes,
+            .normalize_output_nfc = opts.full_config.@"normalize-output-nfc",
             .default_cursor_style = opts.config.cursor_style,
             .default_cursor_blink = opts.config.cursor_blink,
             .default_xt_checksum = opts.config.xt_checksum_extension,
