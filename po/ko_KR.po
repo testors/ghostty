@@ -4,14 +4,15 @@
 # Ruben Engelbrecht <hey@rme.gg>, 2025.
 # GyuYong Jung <obliviscence@gmail.com>, 2026.
 # dobbylee <leekw1245@gmail.com>, 2026.
+# 강기현 <testors@gmail.com>, 2026.
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: com.mitchellh.ghostty\n"
 "Report-Msgid-Bugs-To: m@mitchellh.com\n"
 "POT-Creation-Date: 2026-10-23 23:21+0900\n"
-"PO-Revision-Date: 2026-08-14 23:43+0900\n"
-"Last-Translator: dobbylee <leekw1245@gmail.com>\n"
+"PO-Revision-Date: 2026-10-23 23:40+0900\n"
+"Last-Translator: 강기현 <testors@gmail.com>\n"
 "Language-Team: Korean <translation-team-ko@googlegroups.com>\n"
 "Language: ko\n"
 "MIME-Version: 1.0\n"
@@ -92,7 +93,7 @@ msgstr "제목 변경…"
 
 #: src/apprt/gtk/ui/1.0/surface.blp:348
 msgid "Reset Title"
-msgstr ""
+msgstr "제목 초기화"
 
 #: src/apprt/gtk/ui/1.0/surface.blp:353 src/apprt/gtk/ui/1.4/window.blp:195
 #: src/apprt/gtk/ui/1.4/window.blp:273 src/input/command.zig:505
@@ -130,7 +131,7 @@ msgstr "탭 제목 변경…"
 #: src/apprt/gtk/ui/1.0/surface.blp:391 src/apprt/gtk/ui/1.4/window.blp:364
 #: src/input/command.zig:482
 msgid "Reset Tab Title"
-msgstr ""
+msgstr "탭 제목 초기화"
 
 #: src/apprt/gtk/ui/1.0/surface.blp:396 src/apprt/gtk/ui/1.4/window.blp:61
 #: src/apprt/gtk/ui/1.4/window.blp:125 src/apprt/gtk/ui/1.4/window.blp:252
@@ -167,7 +168,7 @@ msgstr "설정"
 
 #: src/apprt/gtk/ui/1.0/surface.blp:432 src/apprt/gtk/ui/1.4/window.blp:321
 msgid "Settings…"
-msgstr ""
+msgstr "설정…"
 
 #: src/apprt/gtk/ui/1.0/surface.blp:437 src/apprt/gtk/ui/1.4/window.blp:326
 msgid "Open Configuration in OS Editor"
@@ -361,119 +362,121 @@ msgstr "이 분할에서 현재 실행 중인 프로세스가 종료됩니다."
 
 #: src/apprt/gtk/class/settings_dialog.zig:91
 msgid "Settings"
-msgstr ""
+msgstr "설정"
 
 #: src/apprt/gtk/class/settings_dialog.zig:182
 msgid "Settings could not be loaded"
-msgstr ""
+msgstr "설정을 불러올 수 없습니다"
 
 #: src/apprt/gtk/class/settings_dialog.zig:183
 msgid "Check the log for details or edit the configuration file directly."
-msgstr ""
+msgstr "자세한 내용은 로그를 확인하거나 설정 파일을 직접 편집하세요."
 
 #: src/apprt/gtk/class/settings_dialog.zig:235
 msgid "Advanced"
-msgstr ""
+msgstr "고급"
 
 #: src/apprt/gtk/class/settings_dialog.zig:255
 msgid "Configuration File"
-msgstr ""
+msgstr "설정 파일"
 
 #: src/apprt/gtk/class/settings_dialog.zig:263
 msgid "Reload from disk"
-msgstr ""
+msgstr "파일에서 다시 불러오기"
 
 #: src/apprt/gtk/class/settings_dialog.zig:269
 msgid "Open in Editor"
-msgstr ""
+msgstr "편집기에서 열기"
 
 #: src/apprt/gtk/class/settings_dialog.zig:366
 msgid "Reset to default"
-msgstr ""
+msgstr "기본값으로 되돌리기"
 
 #: src/apprt/gtk/class/settings_dialog.zig:391
 #: src/apprt/gtk/class/settings_dialog.zig:415
 #: src/apprt/gtk/class/settings_dialog.zig:884
 msgid "Default"
-msgstr ""
+msgstr "기본값"
 
 #: src/apprt/gtk/class/settings_dialog.zig:392
 #: src/apprt/gtk/class/settings_dialog.zig:1277
 msgid "On"
-msgstr ""
+msgstr "켬"
 
 #: src/apprt/gtk/class/settings_dialog.zig:393
 #: src/apprt/gtk/class/settings_dialog.zig:1278
 msgid "Off"
-msgstr ""
+msgstr "끔"
 
 #: src/apprt/gtk/class/settings_dialog.zig:566
 msgid "Changed"
-msgstr ""
+msgstr "변경됨"
 
 #: src/apprt/gtk/class/settings_dialog.zig:575
 msgid "Set on the command line"
-msgstr ""
+msgstr "명령줄에서 설정됨"
 
 #: src/apprt/gtk/class/settings_dialog.zig:626
 #: src/apprt/gtk/class/settings_dialog.zig:1058
 msgid "Remove"
-msgstr ""
+msgstr "삭제"
 
 #: src/apprt/gtk/class/settings_dialog.zig:637
 msgid "Add a value"
-msgstr ""
+msgstr "값 추가"
 
 #: src/apprt/gtk/class/settings_dialog.zig:836
 #: src/apprt/gtk/class/settings_dialog.zig:866
 msgid "Theme"
-msgstr ""
+msgstr "테마"
 
 #: src/apprt/gtk/class/settings_dialog.zig:856
 msgid "Different themes for light and dark mode"
-msgstr ""
+msgstr "라이트 모드와 다크 모드에 다른 테마 사용"
 
 #: src/apprt/gtk/class/settings_dialog.zig:863
 msgid "Light theme"
-msgstr ""
+msgstr "라이트 테마"
 
 #: src/apprt/gtk/class/settings_dialog.zig:864
 msgid "Dark theme"
-msgstr ""
+msgstr "다크 테마"
 
 #: src/apprt/gtk/class/settings_dialog.zig:1015
 msgid "Your Keybindings"
-msgstr ""
+msgstr "내 단축키"
 
 #: src/apprt/gtk/class/settings_dialog.zig:1016
 msgid ""
 "Lines written as keybind = trigger=action. Removing a default shortcut "
 "writes trigger=unbind."
 msgstr ""
+"keybind = trigger=action 형식의 줄로 저장됩니다. 기본 단축키를 삭제하면 "
+"trigger=unbind가 기록됩니다."
 
 #: src/apprt/gtk/class/settings_dialog.zig:1018
 msgid "All Keybindings"
-msgstr ""
+msgstr "모든 단축키"
 
 #: src/apprt/gtk/class/settings_dialog.zig:1067
 msgid "Add keybinding, e.g. ctrl+shift+t=new_tab"
-msgstr ""
+msgstr "단축키 추가 (예: ctrl+shift+t=new_tab)"
 
 #: src/apprt/gtk/class/settings_dialog.zig:1084
 msgid "Remove shortcut"
-msgstr ""
+msgstr "단축키 삭제"
 
 #: src/apprt/gtk/class/settings_dialog.zig:1256
 msgid "Applies to new terminals only"
-msgstr ""
+msgstr "새 터미널에만 적용됩니다"
 
 #: src/apprt/gtk/class/settings_dialog.zig:1257
 msgid "Applies to new windows only"
-msgstr ""
+msgstr "새 창에만 적용됩니다"
 
 #: src/apprt/gtk/class/settings_dialog.zig:1258
 msgid "Requires restarting Ghostty"
-msgstr ""
+msgstr "Ghostty를 다시 시작해야 적용됩니다"
 
 #: src/apprt/gtk/class/surface.zig:1210
 msgid "Command Finished"
@@ -507,7 +510,7 @@ msgstr "설정값을 다시 불러왔습니다"
 
 #: src/apprt/gtk/class/window.zig:1423
 msgid "Connected to another machine"
-msgstr ""
+msgstr "다른 컴퓨터에 연결됨"
 
 #: src/apprt/gtk/class/window.zig:2003
 msgid "Copied to clipboard"
@@ -961,15 +964,15 @@ msgstr "현재 탭의 새 제목을 입력합니다."
 
 #: src/input/command.zig:476
 msgid "Reset Terminal Title"
-msgstr ""
+msgstr "터미널 제목 초기화"
 
 #: src/input/command.zig:477
 msgid "Reset the terminal title to the title set by the terminal program."
-msgstr ""
+msgstr "터미널 제목을 터미널 프로그램이 설정한 제목으로 되돌립니다."
 
 #: src/input/command.zig:483
 msgid "Reset the tab title to the title set by the terminal."
-msgstr ""
+msgstr "탭 제목을 터미널이 설정한 제목으로 되돌립니다."
 
 #: src/input/command.zig:496
 msgid "Split the terminal to the left."
@@ -1125,11 +1128,11 @@ msgstr "$EDITOR 또는 $VISUAL을 사용하여 새 창에서 설정 파일을 �
 
 #: src/input/command.zig:618
 msgid "Open Settings"
-msgstr ""
+msgstr "설정 열기"
 
 #: src/input/command.zig:619
 msgid "Open the settings window."
-msgstr ""
+msgstr "설정 창을 엽니다."
 
 #: src/input/command.zig:624
 msgid "Reload Config"
