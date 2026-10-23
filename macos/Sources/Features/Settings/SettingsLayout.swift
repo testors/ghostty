@@ -91,6 +91,7 @@ enum SettingsLayout {
                 Section(title: "Tabs", keys: [
                     "window-new-tab-position",
                     "window-show-tab-bar",
+                    "tab-title-format",
                 ]),
                 Section(title: "Window", keys: [
                     "window-decoration",

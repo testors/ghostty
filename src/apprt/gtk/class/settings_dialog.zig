@@ -1196,7 +1196,7 @@ pub const SettingsDialog = extern struct {
             .window => &.{
                 .{ .title = "Size", .keys = &.{ "window-width", "window-height", "maximize", "fullscreen" } },
                 .{ .title = "Padding", .keys = &.{ "window-padding-x", "window-padding-y", "window-padding-balance", "window-padding-color" } },
-                .{ .title = "Tabs", .keys = &.{ "window-new-tab-position", "window-show-tab-bar" } },
+                .{ .title = "Tabs", .keys = &.{ "window-new-tab-position", "window-show-tab-bar", "tab-title-format" } },
                 .{ .title = "Window", .keys = &.{ "window-decoration", "window-theme", "title" } },
             },
             .terminal => &.{

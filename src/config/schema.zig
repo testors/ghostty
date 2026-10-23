@@ -304,6 +304,7 @@ fn categoryOf(comptime key: []const u8) Category {
         .{ "progress-style", .window },
         .{ "split-preserve-zoom", .window },
         .{ "tab-inherit-working-directory", .window },
+        .{ "tab-title-format", .window },
         .{ "split-inherit-working-directory", .window },
 
         .{ "keybind", .keybindings },
@@ -666,6 +667,7 @@ test "classification" {
     try testing.expect(get("cursor-style-blink").?.optional);
     try testing.expectEqual(Category.macos, get("macos-titlebar-style").?.category);
     try testing.expectEqual(Category.font, get("adjust-cell-height").?.category);
+    try testing.expectEqual(Category.window, get("tab-title-format").?.category);
     try testing.expectEqual(Apply.new_window, get("macos-titlebar-style").?.apply);
     try testing.expectEqual(Platform.linux, get("gtk-wide-tabs").?.platform);
     try testing.expect(get("nope") == null);
