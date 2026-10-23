@@ -93,11 +93,6 @@ template $GhosttyWindow: Adw.ApplicationWindow {
         view: tab_view;
         visible: bind template.tabs-visible;
 
-        GestureClick {
-          pressed => $tab_bar_pressed();
-          button: 0;
-        }
-
         [start]
         Gtk.Box {
           orientation: horizontal;

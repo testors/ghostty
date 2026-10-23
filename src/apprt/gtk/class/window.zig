@@ -351,6 +351,20 @@ pub const Window = extern struct {
             self.as(gtk.Widget).addCssClass("devel");
         }
 
+        // Double-clicking the tab bar renames the tab. This is set up here
+        // rather than in the blueprint because Adw.TabBar takes any child
+        // without a type there as its start action widget.
+        const tab_bar_click = gtk.GestureClick.new();
+        tab_bar_click.as(gtk.GestureSingle).setButton(0);
+        _ = gtk.GestureClick.signals.pressed.connect(
+            tab_bar_click,
+            *Self,
+            tabBarPressed,
+            self,
+            .{},
+        );
+        priv.tab_bar.as(gtk.Widget).addController(tab_bar_click.as(gtk.EventController));
+
         // Setup our tab binding group. This ensures certain properties
         // are only synced from the currently active tab.
         priv.tab_bindings = gobject.BindingGroup.new();
