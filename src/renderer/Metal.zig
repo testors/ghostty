@@ -385,3 +385,98 @@ test {
     _ = Atlas;
     _ = AtlasCache;
 }
+
+test "Metal discarded frame is not presented and releases its atlas lease" {
+    const testing = std.testing;
+    var pool = objc.AutoreleasePool.init();
+    defer pool.deinit();
+    const device = objc.Object.fromId(mtl.MTLCreateSystemDefaultDevice() orelse return error.SkipZigTest);
+    defer device.release();
+    const queue = device.msgSend(objc.Object, objc.sel("newCommandQueue"), .{});
+    defer queue.release();
+
+    // The first allocation creates the cache. The second is the atlas
+    // lease, which fails the way it would under memory pressure.
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 1 });
+    const cache = try AtlasCache.init(failing.allocator());
+    defer cache.deinit();
+    const device_ctx: Device = .{
+        .device = device,
+        .queue = queue,
+        .atlases = cache,
+        .default_storage_mode = .shared,
+        .max_texture_size = 16384,
+    };
+
+    // Only the state touched by begin, syncAtlas, discard, and a
+    // synchronous complete is valid.
+    var r: Renderer = undefined;
+    r.api.device = &device_ctx;
+    r.api.queue = queue;
+    r.api.atlas = null;
+    r.api.layer = try IOSurfaceLayer.init();
+    defer r.api.layer.release();
+    defer r.api.releaseAtlas();
+    r.health = .init(.healthy);
+    r.swap_chain = .{ .frames = undefined };
+
+    var target = try Target.init(.{
+        .device = device,
+        .width = 8,
+        .height = 8,
+        .pixel_format = .bgra8unorm,
+        .storage_mode = .shared,
+    });
+    defer target.deinit();
+
+    var grid: font.SharedGrid = .{
+        .atlas_grayscale = try font.Atlas.init(testing.allocator, 8, .grayscale),
+        .atlas_color = try font.Atlas.init(testing.allocator, 8, .bgra),
+        .lock = .init,
+        .resolver = undefined,
+        .metrics = undefined,
+    };
+    defer grid.atlas_grayscale.deinit(testing.allocator);
+    defer grid.atlas_color.deinit(testing.allocator);
+
+    const Draw = struct {
+        /// Mirrors `drawFrameLocked`: a frame that fails after `begin`
+        /// is discarded, never completed.
+        fn run(renderer: *Renderer, t: *Target, g: *font.SharedGrid) !void {
+            var frame = try renderer.api.beginFrame(renderer, t);
+            errdefer frame.discard();
+            _ = try renderer.api.syncAtlas(&frame, g);
+            frame.complete(true);
+        }
+
+        fn contents(renderer: *Renderer) ?*anyopaque {
+            return renderer.api.layer.layer.getProperty(?*anyopaque, "contents");
+        }
+    };
+
+    // The atlas lease fails to allocate. Nothing was drawn, so the
+    // layer must keep its old contents.
+    try testing.expectEqual(@as(?*anyopaque, null), Draw.contents(&r));
+    try testing.expectError(error.OutOfMemory, Draw.run(&r, &target, &grid));
+    try testing.expectEqual(@as(?*anyopaque, null), Draw.contents(&r));
+
+    // The failing allocator rejects every allocation from the fail
+    // index onward. Memory pressure is over, so later leases allocate
+    // normally.
+    cache.alloc = testing.allocator;
+
+    // A frame discarded after a successful sync must not present, and
+    // must release the shared atlas lease for other surfaces.
+    {
+        var frame = try r.api.beginFrame(&r, &target);
+        _ = try r.api.syncAtlas(&frame, &grid);
+        frame.discard();
+    }
+    try testing.expectEqual(@as(?*anyopaque, null), Draw.contents(&r));
+    try testing.expect(r.api.atlas.?.mutex.tryLock());
+    r.api.atlas.?.mutex.unlock(global.io());
+
+    // The next frame completes and presents normally.
+    try Draw.run(&r, &target, &grid);
+    try testing.expect(Draw.contents(&r) != null);
+}

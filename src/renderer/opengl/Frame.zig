@@ -88,3 +88,13 @@ pub fn complete(self: *const Self, sync: bool) void {
     // Report the health to the renderer.
     self.renderer.frameCompleted(health);
 }
+
+/// Discard this frame without presenting it.
+///
+/// Used when drawing fails after `begin`. OpenGL executes commands
+/// immediately and this frame holds no resources of its own, so there
+/// is nothing to release. No completion callback runs, so the caller
+/// still owns the frame permit.
+pub fn discard(self: *const Self) void {
+    _ = self;
+}

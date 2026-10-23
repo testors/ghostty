@@ -138,3 +138,17 @@ pub inline fn complete(self: *Self, sync: bool) void {
         CompletionBlock.invoke(&self.block, .{self.buffer.value});
     }
 }
+
+/// Discard this frame without committing or presenting it.
+///
+/// Used when drawing fails after `begin`. The target was not fully
+/// drawn, so presenting it would show stale or blank contents. No
+/// completion callback runs, so the caller still owns the frame
+/// permit. The uncommitted command buffer is dropped along with the
+/// autorelease pool that wraps `drawFrame`.
+pub fn discard(self: *Self) void {
+    if (self.atlas_mutex) |mutex| {
+        mutex.unlock(global.io());
+        self.atlas_mutex = null;
+    }
+}

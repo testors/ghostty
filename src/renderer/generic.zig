@@ -1820,10 +1820,10 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             self.cells_rebuilt = false;
             self.images_rebuilt = false;
 
-            // Wait for a frame to be available.
+            // Wait for a frame to be available. We own the frame permit
+            // until the frame is completed, so any error releases it.
             const frame = swap_chain.nextFrame();
-            var frame_owned = true;
-            errdefer if (frame_owned) swap_chain.releaseFrame();
+            errdefer swap_chain.releaseFrame();
             // log.debug("drawing frame index={}", .{swap_chain.frame_index});
 
             // If we need to reinitialize our shaders, do so.
@@ -1917,11 +1917,13 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 frame.color_modified = self.font_grid.atlas_color.modified.load(.monotonic);
             }
 
-            // Get a frame context from the graphics API.
+            // Get a frame context from the graphics API. If anything
+            // fails before the frame is completed, the target was not
+            // fully drawn, so we discard the frame rather than complete
+            // it. Completing even an empty frame would present stale or
+            // blank contents.
             var frame_ctx = try self.api.beginFrame(self, &frame.target);
-            defer frame_ctx.complete(sync);
-            // Completion now owns the frame permit, including on upload errors.
-            frame_owned = false;
+            errdefer frame_ctx.discard();
 
             const atlases: [2]Texture = if (managed_atlas)
                 try self.api.syncAtlas(&frame_ctx, self.font_grid)
@@ -2058,6 +2060,10 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     });
                 }
             }
+
+            // Submit and present the frame. From here on completion owns
+            // the frame permit and releases it through `frameCompleted`.
+            frame_ctx.complete(sync);
 
             return false;
         }
