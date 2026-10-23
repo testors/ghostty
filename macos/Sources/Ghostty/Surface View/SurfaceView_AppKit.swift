@@ -96,8 +96,9 @@ extension Ghostty {
         /// Whether the belonging window is visible
         ///
         /// We track this to restore surface occlusion state
-        /// after this surface is dragged to another window
-        var isWindowVisible = false
+        /// after this surface is dragged to another window. Nil ensures the
+        /// initial state is sent even when the surface starts out hidden.
+        var isWindowVisible: Bool?
 
         /// The configuration derived from the Ghostty config so we don't need to rely on references.
         @Published private(set) var derivedConfig: DerivedConfig

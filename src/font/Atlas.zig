@@ -45,6 +45,11 @@ format: Format = .grayscale,
 /// to observe it.
 modified: std.atomic.Value(usize) = .{ .raw = 0 },
 
+/// Bounded change history for GPU consumers at different versions. This is
+/// protected by the same external lock as data, not by the atomic counter.
+/// Falling behind the history simply requires a full upload.
+changes: [64]Region = undefined,
+
 /// This will be incremented every time the atlas is resized. This is useful
 /// for knowing if a GPU texture can be updated in-place or if it requires
 /// a resize operation.
@@ -86,6 +91,75 @@ pub const Region = extern struct {
     width: u32,
     height: u32,
 };
+
+fn fullRegion(self: *const Atlas) Region {
+    return .{ .x = 0, .y = 0, .width = self.size, .height = self.size };
+}
+
+fn recordChange(self: *Atlas, region: Region) void {
+    const version = self.modified.load(.monotonic) + 1;
+    self.changes[version % self.changes.len] = region;
+    self.modified.store(version, .monotonic);
+}
+
+/// Return one bounding rectangle covering all writes since version. Readers
+/// must hold the atlas's external lock. Reading does not consume changes, so
+/// independent GPU consumers cannot cause each other to miss an update.
+pub fn modifiedRegion(self: *const Atlas, version: usize) ?Region {
+    const current = self.modified.load(.monotonic);
+    if (version == current) return null;
+    if (version == 0 or version > current or current - version > self.changes.len)
+        return self.fullRegion();
+
+    var x: u32 = self.size;
+    var y: u32 = self.size;
+    var right: u32 = 0;
+    var bottom: u32 = 0;
+    for (version + 1..current + 1) |v| {
+        const region = self.changes[v % self.changes.len];
+        x = @min(x, region.x);
+        y = @min(y, region.y);
+        right = @max(right, region.x + region.width);
+        bottom = @max(bottom, region.y + region.height);
+    }
+    return .{ .x = x, .y = y, .width = right - x, .height = bottom - y };
+}
+
+test "modifiedRegion batches writes for independent consumers" {
+    var atlas = try Atlas.init(testing.allocator, 32, .grayscale);
+    defer atlas.deinit(testing.allocator);
+    try testing.expectEqualDeep(atlas.fullRegion(), atlas.modifiedRegion(0).?);
+    const first = atlas.modified.load(.monotonic);
+    try testing.expectEqual(null, atlas.modifiedRegion(first));
+
+    const a: Region = .{ .x = 1, .y = 2, .width = 2, .height = 2 };
+    atlas.set(a, &.{ 1, 2, 3, 4 });
+    const second = atlas.modified.load(.monotonic);
+    const b: Region = .{ .x = 7, .y = 4, .width = 3, .height = 1 };
+    atlas.setFromLarger(b, &.{ 5, 6, 7, 8 }, 4, 1, 0);
+    try testing.expectEqualDeep(b, atlas.modifiedRegion(second).?);
+    try testing.expectEqualDeep(Region{ .x = 1, .y = 2, .width = 9, .height = 3 }, atlas.modifiedRegion(first).?);
+    // Reading a recent version must not consume an older consumer's changes.
+    try testing.expectEqualDeep(b, atlas.modifiedRegion(second).?);
+}
+
+test "modifiedRegion falls back after history overflow resize and clear" {
+    var atlas = try Atlas.init(testing.allocator, 8, .bgra);
+    defer atlas.deinit(testing.allocator);
+    const version = atlas.modified.load(.monotonic);
+    const region: Region = .{ .x = 1, .y = 1, .width = 1, .height = 1 };
+    for (0..atlas.changes.len) |_| atlas.set(region, &.{ 1, 2, 3, 4 });
+    try testing.expectEqualDeep(region, atlas.modifiedRegion(version).?);
+    atlas.set(region, &.{ 5, 6, 7, 8 });
+    try testing.expectEqualDeep(atlas.fullRegion(), atlas.modifiedRegion(version).?);
+
+    const before_grow = atlas.modified.load(.monotonic);
+    try atlas.grow(testing.allocator, 16);
+    try testing.expectEqualDeep(atlas.fullRegion(), atlas.modifiedRegion(before_grow).?);
+    const before_clear = atlas.modified.load(.monotonic);
+    atlas.clear();
+    try testing.expectEqualDeep(atlas.fullRegion(), atlas.modifiedRegion(before_clear).?);
+}
 
 /// Number of nodes to preallocate in the list on init.
 ///
@@ -271,7 +345,7 @@ pub fn set(self: *Atlas, reg: Region, data: []const u8) void {
         );
     }
 
-    _ = self.modified.fetchAdd(1, .monotonic);
+    self.recordChange(reg);
 }
 
 /// Like `set` but allows specifying a width for the source data and an
@@ -302,7 +376,7 @@ pub fn setFromLarger(
         );
     }
 
-    _ = self.modified.fetchAdd(1, .monotonic);
+    self.recordChange(reg);
 }
 
 pub const grow_tw = tripwire.module(enum {
@@ -359,13 +433,13 @@ pub fn grow(self: *Atlas, alloc: Allocator, size_new: u32) Allocator.Error!void 
     });
 
     // We are both modified and resized
-    _ = self.modified.fetchAdd(1, .monotonic);
+    self.recordChange(self.fullRegion());
     _ = self.resized.fetchAdd(1, .monotonic);
 }
 
 // Empty the atlas. This doesn't reclaim any previously allocated memory.
 pub fn clear(self: *Atlas) void {
-    _ = self.modified.fetchAdd(1, .monotonic);
+    self.recordChange(self.fullRegion());
     @memset(self.data, 0);
     self.nodes.clearRetainingCapacity();
 

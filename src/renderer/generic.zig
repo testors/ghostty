@@ -103,6 +103,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         const Buffer = GraphicsAPI.Buffer;
         const Sampler = GraphicsAPI.Sampler;
         const Texture = GraphicsAPI.Texture;
+        const managed_atlas = @hasDecl(GraphicsAPI, "syncAtlas");
         const RenderPass = GraphicsAPI.RenderPass;
 
         const shaderpkg = GraphicsAPI.shaders;
@@ -367,9 +368,9 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             cells: CellTextBuffer,
             cells_bg: CellBgBuffer,
 
-            grayscale: Texture,
+            grayscale: if (managed_atlas) void else Texture,
             grayscale_modified: usize = 0,
-            color: Texture,
+            color: if (managed_atlas) void else Texture,
             color_modified: usize = 0,
 
             target: Target,
@@ -421,18 +422,18 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 //
                 // As with the buffers above, we start these off as small
                 // as possible since they'll inevitably be resized anyway.
-                const grayscale = try api.initAtlasTexture(&.{
+                const grayscale = if (managed_atlas) {} else try api.initAtlasTexture(&.{
                     .data = undefined,
                     .size = 1,
                     .format = .grayscale,
                 });
-                errdefer grayscale.deinit();
-                const color = try api.initAtlasTexture(&.{
+                errdefer if (!managed_atlas) grayscale.deinit();
+                const color = if (managed_atlas) {} else try api.initAtlasTexture(&.{
                     .data = undefined,
                     .size = 1,
                     .format = .bgra,
                 });
-                errdefer color.deinit();
+                errdefer if (!managed_atlas) color.deinit();
 
                 var custom_shader_state =
                     if (custom_shaders)
@@ -462,8 +463,8 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 self.uniforms.deinit();
                 self.cells.deinit();
                 self.cells_bg.deinit();
-                self.grayscale.deinit();
-                self.color.deinit();
+                if (!managed_atlas) self.grayscale.deinit();
+                if (!managed_atlas) self.color.deinit();
                 self.bg_image_buffer.deinit();
                 if (self.custom_shader_state) |*state| state.deinit();
             }
@@ -1218,20 +1219,22 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         ///
         /// Must be called on the render thread.
         pub fn setVisible(self: *Self, visible: bool) void {
-            self.visible = visible;
-            self.syncDisplayLink(null, null);
-
-            // When we're hidden, release our GPU resources.
-            if (!visible) {
+            {
                 self.draw_mutex.lockUncancelable(global.io());
                 defer self.draw_mutex.unlock(global.io());
-                self.releaseGpuResources();
+                self.visible = visible;
+
+                // Keep visibility and resource lifetime in sync with draws
+                // from both the render thread and native display callbacks.
+                if (!visible) self.releaseGpuResources();
             }
+
+            self.syncDisplayLink(null, null);
         }
 
         /// Release the GPU resources we hold while the surface is not
-        /// visible. Today this is the swap chain (render targets, font
-        /// atlas texture copies, cell buffers, custom shader textures),
+        /// visible. Today this is the swap chain (render targets, cell
+        /// buffers, custom shader textures) and our font atlas lease,
         /// which makes up nearly all of a surface's GPU memory usage.
         /// The swap chain is rebuilt on the next `drawFrame`.
         ///
@@ -1248,6 +1251,8 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 sc.deinit();
                 self.swap_chain = null;
             }
+
+            if (managed_atlas) self.api.releaseAtlas();
 
             // Release the shaders as well if we're unrealized.
             if (!self.display_realized) {
@@ -1317,6 +1322,9 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         pub fn setFontGrid(self: *Self, grid: *font.SharedGrid) void {
             self.draw_mutex.lockUncancelable(global.io());
             defer self.draw_mutex.unlock(global.io());
+
+            // Release before the old CPU grid can be dereferenced.
+            if (managed_atlas and self.font_grid != grid) self.api.releaseAtlas();
 
             // Update our grid
             self.font_grid = grid;
@@ -1741,6 +1749,10 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             self: *Self,
             sync: bool,
         ) !bool {
+            // Native display callbacks can bypass the render thread's
+            // visibility check. Never recreate GPU resources while hidden.
+            if (!self.visible) return false;
+
             // After the graphics API is complete (so we defer) we want to
             // update our scrollbar state.
             defer if (self.scrollbar_dirty) {
@@ -1810,7 +1822,8 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
             // Wait for a frame to be available.
             const frame = swap_chain.nextFrame();
-            errdefer swap_chain.releaseFrame();
+            var frame_owned = true;
+            errdefer if (frame_owned) swap_chain.releaseFrame();
             // log.debug("drawing frame index={}", .{swap_chain.frame_index});
 
             // If we need to reinitialize our shaders, do so.
@@ -1887,26 +1900,33 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             }
 
             // If our font atlas changed, sync the texture data
-            texture: {
+            if (!managed_atlas) texture: {
                 const modified = self.font_grid.atlas_grayscale.modified.load(.monotonic);
                 if (modified <= frame.grayscale_modified) break :texture;
                 self.font_grid.lock.lockSharedUncancelable(global.io());
                 defer self.font_grid.lock.unlockShared(global.io());
-                frame.grayscale_modified = self.font_grid.atlas_grayscale.modified.load(.monotonic);
                 try self.syncAtlasTexture(&self.font_grid.atlas_grayscale, &frame.grayscale);
+                frame.grayscale_modified = self.font_grid.atlas_grayscale.modified.load(.monotonic);
             }
-            texture: {
+            if (!managed_atlas) texture: {
                 const modified = self.font_grid.atlas_color.modified.load(.monotonic);
                 if (modified <= frame.color_modified) break :texture;
                 self.font_grid.lock.lockSharedUncancelable(global.io());
                 defer self.font_grid.lock.unlockShared(global.io());
-                frame.color_modified = self.font_grid.atlas_color.modified.load(.monotonic);
                 try self.syncAtlasTexture(&self.font_grid.atlas_color, &frame.color);
+                frame.color_modified = self.font_grid.atlas_color.modified.load(.monotonic);
             }
 
             // Get a frame context from the graphics API.
             var frame_ctx = try self.api.beginFrame(self, &frame.target);
             defer frame_ctx.complete(sync);
+            // Completion now owns the frame permit, including on upload errors.
+            frame_owned = false;
+
+            const atlases: [2]Texture = if (managed_atlas)
+                try self.api.syncAtlas(&frame_ctx, self.font_grid)
+            else
+                .{ frame.grayscale, frame.color };
 
             {
                 var pass = frame_ctx.renderPass(&.{.{
@@ -1981,8 +2001,8 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                         frame.cells_bg.buffer,
                     },
                     .textures = &.{
-                        frame.grayscale,
-                        frame.color,
+                        atlases[0],
+                        atlases[1],
                     },
                     .draw = .{
                         .type = .triangle_strip,
@@ -3688,6 +3708,21 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             }
 
             try texture.replaceRegion(0, 0, atlas.size, atlas.size, atlas.data);
+        }
+
+        test "hidden draw skips graphics API and resource recreation" {
+            // The OpenGL draw path requires EGL, which we don't link on Darwin.
+            if (GraphicsAPI == renderer.OpenGL and builtin.target.os.tag.isDarwin())
+                return error.SkipZigTest;
+
+            // Only the mutex and visibility are valid. A hidden draw must
+            // not access the graphics API, swap chain, or display link,
+            // including synchronous draws from native display callbacks.
+            var self: Self = undefined;
+            self.draw_mutex = .init;
+            self.visible = false;
+            try self.drawFrame(false);
+            try self.drawFrame(true);
         }
     };
 }

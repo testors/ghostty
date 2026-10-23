@@ -2,6 +2,7 @@
 const Self = @This();
 
 const std = @import("std");
+const global = @import("../../global.zig");
 const Allocator = std.mem.Allocator;
 const objc = @import("objc");
 
@@ -26,6 +27,9 @@ buffer: objc.Object,
 
 block: CompletionBlock.Context,
 
+/// A shared atlas lease locks encoding through submission, never GPU waits.
+atlas_mutex: ?*std.Io.Mutex = null,
+
 /// Begin encoding a frame.
 pub fn begin(
     opts: Options,
@@ -35,11 +39,11 @@ pub fn begin(
     /// The target is presented via the provided renderer's API when completed.
     target: *Target,
 ) !Self {
-    const buffer = opts.queue.msgSend(
-        objc.Object,
+    const buffer = objc.Object.fromId(opts.queue.msgSend(
+        ?*anyopaque,
         objc.sel("commandBuffer"),
         .{},
-    );
+    ) orelse return error.MetalFailed);
 
     // Create our block to register for completion updates.
     // The block is deallocated by the objC runtime on success.
@@ -120,6 +124,11 @@ pub inline fn complete(self: *Self, sync: bool) void {
     }
 
     self.buffer.msgSend(void, objc.sel("commit"), .{});
+
+    if (self.atlas_mutex) |mutex| {
+        mutex.unlock(global.io());
+        self.atlas_mutex = null;
+    }
 
     // If we need to complete synchronously, we wait until
     // the buffer is completed and invoke the block directly.

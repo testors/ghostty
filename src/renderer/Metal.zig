@@ -2,6 +2,7 @@
 pub const Metal = @This();
 
 const std = @import("std");
+const global = @import("../global.zig");
 const assert = @import("../quirks.zig").inlineAssert;
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
@@ -16,6 +17,8 @@ const Renderer = rendererpkg.GenericRenderer(Metal);
 const shadertoy = @import("shadertoy.zig");
 
 const mtl = @import("metal/api.zig");
+const Atlas = @import("metal/Atlas.zig");
+const AtlasCache = @import("metal/AtlasCache.zig");
 const IOSurfaceLayer = @import("metal/IOSurfaceLayer.zig");
 pub const Device = @import("metal/Device.zig");
 
@@ -47,6 +50,8 @@ device: *const Device,
 /// MTLCommandQueue
 queue: objc.Object,
 
+atlas: ?*AtlasCache.Entry = null,
+
 /// Alpha blending mode
 blending: configpkg.Config.AlphaBlending,
 
@@ -65,9 +70,8 @@ pub fn init(
 
     _ = alloc;
 
-    // Create a MTLCommandQueue for our app-scoped MTLDevice.
-    const mtl_device = device.device;
-    const queue = mtl_device.msgSend(objc.Object, objc.sel("newCommandQueue"), .{});
+    // Shared atlas updates and readers must use one ordered queue.
+    const queue = device.queue.retain();
     errdefer queue.release();
 
     const ViewInfo = struct {
@@ -137,6 +141,7 @@ pub fn init(
 }
 
 pub fn deinit(self: *Metal) void {
+    self.releaseAtlas();
     self.queue.release();
 
     // The MTLDevice is app-scoped and destroyed
@@ -343,35 +348,25 @@ pub inline fn imageTextureOptions(
     };
 }
 
-/// Initializes a Texture suitable for the provided font atlas.
-pub fn initAtlasTexture(
-    self: *const Metal,
-    atlas: *const font.Atlas,
-) Texture.Error!Texture {
-    const pixel_format: mtl.MTLPixelFormat = switch (atlas.format) {
-        .grayscale => .r8unorm,
-        .bgra => .bgra8unorm_srgb,
-        else => @panic("unsupported atlas format for Metal texture"),
+/// One atlas pair shared by all surfaces using this font grid.
+pub fn syncAtlas(self: *Metal, frame: *Frame, grid: *font.SharedGrid) ![2]Texture {
+    const entry = self.atlas orelse entry: {
+        self.atlas = try self.device.atlases.acquire(grid);
+        break :entry self.atlas.?;
     };
+    assert(entry.grid == grid);
+    entry.mutex.lockUncancelable(global.io());
+    errdefer entry.mutex.unlock(global.io());
+    const textures = try entry.atlas.sync(self.device.device, grid, frame.buffer);
+    // Keep the entry locked until this buffer is committed. Merely locking
+    // CPU uploads would let another surface submit a dependent draw first.
+    frame.atlas_mutex = &entry.mutex;
+    return textures;
+}
 
-    return try Texture.init(
-        .{
-            .device = self.device.device,
-            .pixel_format = pixel_format,
-            .resource_options = .{
-                // Indicate that the CPU writes to this resource but never reads it.
-                .cpu_cache_mode = .write_combined,
-                .storage_mode = self.device.default_storage_mode,
-            },
-            .usage = .{
-                // We only need to read from this texture from a shader.
-                .shader_read = true,
-            },
-        },
-        atlas.size,
-        atlas.size,
-        null,
-    );
+pub fn releaseAtlas(self: *Metal) void {
+    if (self.atlas) |entry| self.device.atlases.release(entry);
+    self.atlas = null;
 }
 
 /// Begin a frame.
@@ -384,4 +379,9 @@ pub inline fn beginFrame(
     target: *Target,
 ) !Frame {
     return try Frame.begin(.{ .queue = self.queue }, renderer, target);
+}
+
+test {
+    _ = Atlas;
+    _ = AtlasCache;
 }

@@ -1,8 +1,7 @@
 //! The Metal device context.
 //!
 //! This holds the MTLDevice and metadata derived from it.
-//! The device is shared by all surface renderers; each renderer
-//! creates its own MTLCommandQueue.
+//! The device, command queue and font atlas cache are shared by all surfaces.
 const Device = @This();
 
 const std = @import("std");
@@ -11,6 +10,7 @@ const objc = @import("objc");
 
 const mtl = @import("api.zig");
 const shaders = @import("shaders.zig");
+const AtlasCache = @import("AtlasCache.zig");
 
 const log = std.log.scoped(.metal);
 
@@ -20,6 +20,10 @@ pub const Options = struct {};
 
 /// MTLDevice
 device: objc.Object,
+
+/// Common submission order for draws and updates of shared atlas textures.
+queue: objc.Object,
+atlases: *AtlasCache,
 
 /// The default storage mode to use for resources created with our device.
 ///
@@ -40,6 +44,15 @@ pub fn init(alloc: std.mem.Allocator, options: Options) !*Device {
     const device = try chooseDevice();
     errdefer device.release();
 
+    const queue = objc.Object.fromId(device.msgSend(
+        ?*anyopaque,
+        objc.sel("newCommandQueue"),
+        .{},
+    ) orelse return error.MetalFailed);
+    errdefer queue.release();
+    const atlases = try AtlasCache.init(alloc);
+    errdefer atlases.deinit();
+
     // Grab metadata about the device.
     const default_storage_mode: mtl.MTLResourceOptions.StorageMode = switch (comptime builtin.target.os.tag) {
         // manage mode is not supported by iOS
@@ -54,6 +67,8 @@ pub fn init(alloc: std.mem.Allocator, options: Options) !*Device {
 
     self.* = .{
         .device = device,
+        .queue = queue,
+        .atlases = atlases,
         .default_storage_mode = default_storage_mode,
         .max_texture_size = max_texture_size,
     };
@@ -61,6 +76,8 @@ pub fn init(alloc: std.mem.Allocator, options: Options) !*Device {
 }
 
 pub fn deinit(self: *Device, alloc: std.mem.Allocator) void {
+    self.atlases.deinit();
+    self.queue.release();
     self.device.release();
     alloc.destroy(self);
 }

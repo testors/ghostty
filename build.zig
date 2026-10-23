@@ -397,6 +397,9 @@ pub fn build(b: *std.Build) !void {
         }
         _ = try deps.add(test_exe);
 
+        // The atlas tests exercise ordered uploads on a real Metal device.
+        if (config.renderer == .metal) test_exe.root_module.linkFramework("Metal", .{});
+
         addGhosttyH(b, test_exe.root_module, config.baselineTarget(b.graph.io), .debug);
 
         // Normal test running

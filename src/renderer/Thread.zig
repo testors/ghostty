@@ -313,15 +313,15 @@ fn drainMailbox(self: *Thread) !void {
                 // Visibility affects our QoS class
                 self.setQosClass();
 
+                // Update the renderer before drawing the first visible frame.
+                self.renderer.setVisible(v);
+
                 // If we became visible then we immediately rebuild cells
                 // (renderCallback skips updateFrame while invisible) and
                 // draw. Going through renderCallback also reschedules
                 // any Kitty graphics animation wakeup that lapsed
                 // while we were invisible.
                 if (v) _ = renderCallback(self, undefined, undefined, {});
-
-                // Notify the renderer so it can update any state.
-                self.renderer.setVisible(v);
 
                 // Note that we're explicitly today not stopping any
                 // cursor timers, draw timers, etc. These things have very
