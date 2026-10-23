@@ -22,6 +22,11 @@ extension Ghostty {
     /// The view also publishes the dragging state via `DraggingSurfaceKey` preference,
     /// enabling parent views to react to ongoing drag operations.
     struct SurfaceDragSource: View {
+        /// Resolve an in-app drag without synchronously loading its lazy pasteboard data.
+        static func surface(from sender: any NSDraggingInfo) -> SurfaceView? {
+            (sender.draggingSource as? SurfaceDragSourceView)?.surfaceView
+        }
+
         /// The surface view that will be dragged.
         let surfaceView: SurfaceView
 
@@ -210,6 +215,7 @@ extension Ghostty {
             willBeginAt screenPoint: NSPoint
         ) {
             isTracking = true
+            NotificationCenter.default.post(name: .ghosttySurfaceDragDidBegin, object: surfaceView)
 
             // Reset our escape tracking
             dragCancelledByEscape = false
@@ -253,11 +259,16 @@ extension Ghostty {
 
             isTracking = false
             onDragStateChanged?(false)
+            NotificationCenter.default.post(name: .ghosttySurfaceDragDidEnd, object: surfaceView)
         }
     }
 }
 
 extension Notification.Name {
+    /// App-wide drag lifecycle so other windows can reveal their tab drop targets.
+    static let ghosttySurfaceDragDidBegin = Notification.Name("ghosttySurfaceDragDidBegin")
+    static let ghosttySurfaceDragDidEnd = Notification.Name("ghosttySurfaceDragDidEnd")
+
     /// Posted when a surface drag session ends with no operation (the drag was
     /// released outside a valid drop target) and was not cancelled by the user
     /// pressing escape. The notification's object is the SurfaceView that was dragged.

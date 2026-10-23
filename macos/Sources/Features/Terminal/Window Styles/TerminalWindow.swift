@@ -25,6 +25,11 @@ class TerminalWindow: NSWindow {
     /// Update notification UI in titlebar
     private let updateAccessory = NSTitlebarAccessoryViewController()
 
+    /// Drop targets use public titlebar/tab accessories instead of replacing native tab views.
+    private let surfaceDropAccessory = NSTitlebarAccessoryViewController()
+    private lazy var titlebarSurfaceDropView = TerminalTabDropView(targetWindow: self)
+    private lazy var tabSurfaceDropView = TerminalTabDropView(targetWindow: self)
+
     /// Visual indicator that mirrors the selected tab color.
     private lazy var tabColorIndicator: NSHostingView<TabColorIndicatorView> = {
         let view = NSHostingView(rootView: TabColorIndicatorView(tabColor: tabColor))
@@ -134,6 +139,10 @@ class TerminalWindow: NSWindow {
         // Create our reset zoom titlebar accessory. We have to have a title
         // to do this or AppKit triggers an assertion.
         if styleMask.contains(.titled) {
+            surfaceDropAccessory.layoutAttribute = .right
+            surfaceDropAccessory.view = titlebarSurfaceDropView
+            addTitlebarAccessoryViewController(surfaceDropAccessory)
+
             resetZoomAccessory.layoutAttribute = .right
             resetZoomAccessory.view = NSHostingView(rootView: ResetZoomAccessoryView(
                 viewModel: viewModel,
@@ -166,10 +175,22 @@ class TerminalWindow: NSWindow {
         stackView.setHuggingPriority(.defaultHigh, for: .horizontal)
         stackView.spacing = 4
         stackView.alignment = .centerY
+        stackView.addArrangedSubview(tabSurfaceDropView)
         stackView.addArrangedSubview(tabColorIndicator)
         stackView.addArrangedSubview(keyEquivalentLabel)
         stackView.addArrangedSubview(resetZoomTabButton)
         tab.accessoryView = stackView
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(surfaceDragDidBegin(_:)),
+            name: .ghosttySurfaceDragDidBegin,
+            object: nil)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(surfaceDragDidEnd(_:)),
+            name: .ghosttySurfaceDragDidEnd,
+            object: nil)
 
         // Get our saved level
         level = UserDefaults.ghostty.value(forKey: Self.defaultLevelKey) as? NSWindow.Level ?? .normal
@@ -193,6 +214,7 @@ class TerminalWindow: NSWindow {
     }
 
     override func close() {
+        surfaceDragDidEnd(nil)
         tabTitleEditor.finishEditing(commit: true)
         NotificationCenter.default.post(name: Self.terminalWillCloseNotification, object: self)
         super.close()
@@ -628,9 +650,22 @@ class TerminalWindow: NSWindow {
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         if let observer = tabMenuObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+    }
+
+    @objc private func surfaceDragDidBegin(_ notification: Notification) {
+        guard let surface = notification.object as? Ghostty.SurfaceView,
+              terminalController?.canMoveSurfaceToTab(surface) == true else { return }
+        titlebarSurfaceDropView.surface = surface
+        tabSurfaceDropView.surface = surface
+    }
+
+    @objc private func surfaceDragDidEnd(_ notification: Notification?) {
+        titlebarSurfaceDropView.surface = nil
+        tabSurfaceDropView.surface = nil
     }
 
     // MARK: Config

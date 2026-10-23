@@ -533,6 +533,7 @@ class BaseTerminalController: NSWindowController,
             // This is a weird workaround, since `resignFirstResponder` wasn't called on `focusedSurface` after drag,
             // but the first responder became the window itself.
             moveFocusTo: nextFocus ?? focusedSurface,
+            moveFocusFrom: focusedSurface,
             undoAction: "Close Terminal"
         )
     }

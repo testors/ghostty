@@ -419,12 +419,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     static func newTab(
         _ ghostty: Ghostty.App,
         from parent: NSWindow? = nil,
-        withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil
+        withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil,
+        withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil
     ) -> TerminalController? {
         // Making sure that we're dealing with a TerminalController. If not,
         // then we just create a new window.
         guard let parent,
               let parentController = parent.windowController as? TerminalController else {
+            if let tree {
+                return newWindow(ghostty, tree: tree, confirmUndo: false)
+            }
             return newWindow(ghostty, withBaseConfig: baseConfig, withParent: parent)
         }
 
@@ -442,7 +446,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
 
         // Create a new window and add it to the parent
-        let controller = TerminalController.init(ghostty, withBaseConfig: baseConfig)
+        let controller = TerminalController.init(ghostty, withBaseConfig: baseConfig, withSurfaceTree: tree)
         controller.isBackgroundOpaque = parentController.isBackgroundOpaque
         guard let window = controller.window else { return controller }
 
@@ -466,7 +470,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         if window.tabbingMode != .disallowed {
             let tabCreated: Bool
             // Add the window to the tab group and show it.
-            switch ghostty.config.windowNewTabPosition {
+            // A surface drop explicitly chooses the tab to insert after.
+            switch tree == nil ? ghostty.config.windowNewTabPosition : "current" {
             case "end":
                 // If we already have a tab group and we want the new tab to open at the end,
                 // then we use the last window in the tab group as the parent.
@@ -532,7 +537,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             ) { target in
                 // Close the tab when undoing
                 undoManager.disableUndoRegistration {
-                    target.closeTab(nil)
+                    if tree != nil {
+                        target.closeTabImmediately()
+                    } else {
+                        target.closeTab(nil)
+                    }
                 }
 
                 // Register redo action
@@ -543,12 +552,49 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                     _ = TerminalController.newTab(
                         ghostty,
                         from: parent,
-                        withBaseConfig: baseConfig)
+                        withBaseConfig: baseConfig,
+                        withSurfaceTree: tree)
                 }
             }
         }
 
         return controller
+    }
+
+    /// Whether a dragged surface can become a new tab after this window.
+    func canMoveSurfaceToTab(_ surface: Ghostty.SurfaceView) -> Bool {
+        guard let window,
+              window.styleMask.contains(.titled),
+              window.tabbingMode != .disallowed,
+              !surfaceTree.isEmpty,
+              let source = BaseTerminalController.controller(owning: surface) else { return false }
+
+        if let fullscreenStyle, fullscreenStyle.isFullscreen && !fullscreenStyle.supportsTabs {
+            return false
+        }
+
+        // Moving the only surface onto its own tab would do nothing.
+        return source !== self || surfaceTree.isSplit
+    }
+
+    @discardableResult
+    func moveSurfaceToTab(_ surface: Ghostty.SurfaceView) -> Bool {
+        guard canMoveSurfaceToTab(surface),
+              let window,
+              let source = BaseTerminalController.controller(owning: surface) else { return false }
+
+        // Keep the surface alive while detaching it, even if its old window closes.
+        let tree = SplitTree<Ghostty.SurfaceView>(view: surface)
+        undoManager?.beginUndoGrouping()
+        defer {
+            undoManager?.setActionName("Move Terminal to Tab")
+            undoManager?.endUndoGrouping()
+        }
+
+        source.closeSurface(surface, withConfirmation: false)
+        let controller = Self.newTab(ghostty, from: window, withSurfaceTree: tree)
+        controller?.focusSurface(surface)
+        return controller != nil
     }
 
     // MARK: - Methods
