@@ -2198,6 +2198,29 @@ keybind: Keybinds = .{},
 /// Available since: 1.1.0
 @"window-subtitle": WindowSubtitle = .false,
 
+/// Whether to show that a terminal is connected to another machine with
+/// ssh, mosh, Eternal Terminal or telnet. A dimmed icon is shown in the
+/// titlebar and in the tabs of such terminals.
+///
+/// The connection is detected from the program running in the foreground
+/// of the terminal, so a remote client started inside a local terminal
+/// multiplexer such as tmux isn't detected. The remote host isn't shown
+/// because it can't be known reliably: the remote client may have
+/// connected onwards to other hosts.
+///
+/// On macOS, the titlebar icon is only shown with the `native` and
+/// `transparent` titlebar styles. On GTK, it is shown in the header bar, so
+/// not with the `tabs` titlebar style or when `gtk-titlebar` is false. The tab
+/// icon is shown on both platforms whenever there are tabs.
+///
+/// Valid values are:
+///
+///   * `visible` - Show the indicator.
+///   * `hidden` - Don't show the indicator.
+///
+/// The default value is `visible`.
+@"window-remote-indicator": WindowRemoteIndicator = .visible,
+
 /// The theme to use for the windows. Valid values:
 ///
 ///   * `auto` - Determine the theme based on the configured terminal
@@ -3495,27 +3518,6 @@ keybind: Keybinds = .{},
 /// usually `cd` to a different directory, open a different file in an
 /// editor, etc.
 @"macos-titlebar-proxy-icon": MacTitlebarProxyIcon = .visible,
-
-/// Whether to show that a terminal is connected to another machine with
-/// ssh, mosh, Eternal Terminal or telnet. A dimmed icon is shown on the
-/// right side of the titlebar and in the tabs of such terminals.
-///
-/// The connection is detected from the program running in the foreground
-/// of the terminal, so a remote client started inside a local terminal
-/// multiplexer such as tmux isn't detected. The remote host isn't shown
-/// because it can't be known reliably: the remote client may have
-/// connected onwards to other hosts.
-///
-/// The titlebar icon is only shown with the `native` and `transparent`
-/// titlebar styles. The tab icon is shown with every style that has tabs.
-///
-/// Valid values are:
-///
-///   * `visible` - Show the indicator.
-///   * `hidden` - Don't show the indicator.
-///
-/// The default value is `visible`.
-@"macos-titlebar-remote-indicator": MacTitlebarRemoteIndicator = .visible,
 
 /// Controls the windowing behavior when dropping a file or folder
 /// onto the Ghostty icon in the macOS dock.
@@ -5604,6 +5606,12 @@ pub const WindowPaddingColor = enum {
 pub const WindowSubtitle = enum {
     false,
     @"working-directory",
+};
+
+/// See window-remote-indicator
+pub const WindowRemoteIndicator = enum {
+    visible,
+    hidden,
 };
 
 pub const LinkPreviews = enum {
@@ -9373,12 +9381,6 @@ pub const MacTitlebarStyle = enum {
 
 /// See macos-titlebar-proxy-icon
 pub const MacTitlebarProxyIcon = enum {
-    visible,
-    hidden,
-};
-
-/// See macos-titlebar-remote-indicator
-pub const MacTitlebarRemoteIndicator = enum {
     visible,
     hidden,
 };

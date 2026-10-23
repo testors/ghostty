@@ -381,15 +381,15 @@ extension Ghostty {
             return MacOSTitlebarProxyIcon(rawValue: str) ?? defaultValue
         }
 
-        var macosTitlebarRemoteIndicator: MacOSTitlebarRemoteIndicator {
-            let defaultValue = MacOSTitlebarRemoteIndicator.visible
+        var windowRemoteIndicator: WindowRemoteIndicator {
+            let defaultValue = WindowRemoteIndicator.visible
             guard let config = self.config else { return defaultValue }
             var v: UnsafePointer<Int8>?
-            let key = "macos-titlebar-remote-indicator"
+            let key = "window-remote-indicator"
             guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
             guard let ptr = v else { return defaultValue }
             let str = String(cString: ptr)
-            return MacOSTitlebarRemoteIndicator(rawValue: str) ?? defaultValue
+            return WindowRemoteIndicator(rawValue: str) ?? defaultValue
         }
 
         var macosDockDropBehavior: MacDockDropBehavior {

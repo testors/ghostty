@@ -277,8 +277,8 @@ extension Ghostty {
         case hidden
     }
 
-    /// Enum for the macos-titlebar-remote-indicator config option
-    enum MacOSTitlebarRemoteIndicator: String {
+    /// Enum for the window-remote-indicator config option
+    enum WindowRemoteIndicator: String {
         case visible
         case hidden
     }
@@ -291,7 +291,7 @@ extension Ghostty {
         var description: String {
             program.isEmpty
                 ? "Connected to another machine"
-                : "Connected to another machine with \(program)"
+                : "Connected to another machine (\(program))"
         }
     }
 

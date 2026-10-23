@@ -67,6 +67,19 @@ template $GhosttyWindow: Adw.ApplicationWindow {
 
         [end]
         Gtk.Box {
+          // Shown while the active terminal is connected to another
+          // machine (ssh, mosh, ...).
+          Gtk.Image {
+            styles [
+              "dim-label",
+            ]
+
+            icon-name: "network-server-symbolic";
+            margin-end: 6;
+            visible: bind $remote_indicator_visible(template.config, tab_view.selected-page.child as <$GhosttyTab>.remote-program) as <bool>;
+            tooltip-text: bind $remote_indicator_tooltip(tab_view.selected-page.child as <$GhosttyTab>.remote-program) as <string>;
+          }
+
           Gtk.ToggleButton {
             icon-name: "view-grid-symbolic";
             tooltip-text: _("View Open Tabs");

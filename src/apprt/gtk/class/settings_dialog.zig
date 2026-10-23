@@ -1197,7 +1197,7 @@ pub const SettingsDialog = extern struct {
                 .{ .title = "Size", .keys = &.{ "window-width", "window-height", "maximize", "fullscreen" } },
                 .{ .title = "Padding", .keys = &.{ "window-padding-x", "window-padding-y", "window-padding-balance", "window-padding-color" } },
                 .{ .title = "Tabs", .keys = &.{ "window-new-tab-position", "window-show-tab-bar", "tab-title-format" } },
-                .{ .title = "Window", .keys = &.{ "window-decoration", "window-theme", "title" } },
+                .{ .title = "Window", .keys = &.{ "window-decoration", "window-theme", "window-remote-indicator", "title" } },
             },
             .terminal => &.{
                 .{ .title = "Shell", .keys = &.{ "shell-integration", "shell-integration-features", "term" } },

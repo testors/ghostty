@@ -272,6 +272,19 @@ pub const Surface = extern struct {
             );
         };
 
+        pub const @"remote-program" = struct {
+            pub const name = "remote-program";
+            const impl = gobject.ext.defineProperty(
+                name,
+                Self,
+                ?[:0]const u8,
+                .{
+                    .default = null,
+                    .accessor = C.privateStringFieldAccessor("remote_program"),
+                },
+            );
+        };
+
         pub const title = struct {
             pub const name = "title";
             const impl = gobject.ext.defineProperty(
@@ -606,6 +619,10 @@ pub const Surface = extern struct {
         /// start in this pwd. If it is set after, it has no impact on the
         /// core surface.
         pwd: ?[:0]const u8 = null,
+
+        /// The program connecting this terminal to another machine ("ssh",
+        /// "mosh", ...), or null if the terminal is local.
+        remote_program: ?[:0]const u8 = null,
 
         /// The title of this surface, if any has been set.
         title: ?[:0]const u8 = null,
@@ -1991,6 +2008,10 @@ pub const Surface = extern struct {
             glib.free(@ptrCast(@constCast(v)));
             priv.pwd = null;
         }
+        if (priv.remote_program) |v| {
+            glib.free(@ptrCast(@constCast(v)));
+            priv.remote_program = null;
+        }
         if (priv.title) |v| {
             glib.free(@ptrCast(@constCast(v)));
             priv.title = null;
@@ -2133,6 +2154,16 @@ pub const Surface = extern struct {
         priv.pwd = null;
         if (pwd) |v| priv.pwd = glib.ext.dupeZ(u8, v);
         self.as(gobject.Object).notifyByPspec(properties.pwd.impl.param_spec);
+    }
+
+    /// Set the program connecting this terminal to another machine, or null
+    /// if it is local. Copies the value.
+    pub fn setRemoteProgram(self: *Self, program: ?[:0]const u8) void {
+        const priv = self.private();
+        if (priv.remote_program) |v| glib.free(@ptrCast(@constCast(v)));
+        priv.remote_program = null;
+        if (program) |v| priv.remote_program = glib.ext.dupeZ(u8, v);
+        self.as(gobject.Object).notifyByPspec(properties.@"remote-program".impl.param_spec);
     }
 
     /// Returns the focus state of this surface.
@@ -3963,6 +3994,7 @@ pub const Surface = extern struct {
                 properties.@"mouse-hidden".impl,
                 properties.@"mouse-hover-url".impl,
                 properties.pwd.impl,
+                properties.@"remote-program".impl,
                 properties.title.impl,
                 properties.@"title-override".impl,
                 properties.zoom.impl,

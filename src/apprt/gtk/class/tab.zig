@@ -104,6 +104,21 @@ pub const Tab = extern struct {
             );
         };
 
+        /// The program connecting the active surface to another machine
+        /// ("ssh", "mosh", ...), or null if it is local.
+        pub const @"remote-program" = struct {
+            pub const name = "remote-program";
+            const impl = gobject.ext.defineProperty(
+                name,
+                Self,
+                ?[:0]const u8,
+                .{
+                    .default = null,
+                    .accessor = C.privateStringFieldAccessor("remote_program"),
+                },
+            );
+        };
+
         pub const tooltip = struct {
             pub const name = "tooltip";
             const impl = gobject.ext.defineProperty(
@@ -169,6 +184,9 @@ pub const Tab = extern struct {
 
         /// The tooltip of this tab. This is usually bound to the active surface.
         tooltip: ?[:0]const u8 = null,
+
+        /// See the "remote-program" property. Bound to the active surface.
+        remote_program: ?[:0]const u8 = null,
 
         // Template bindings
         split_tree: *SplitTree,
@@ -286,6 +304,17 @@ pub const Tab = extern struct {
         return self.getSplitTree().getActiveSurface();
     }
 
+    /// Get the tooltip of this tab. This does not copy the value.
+    pub fn getTooltip(self: *Self) ?[:0]const u8 {
+        return self.private().tooltip;
+    }
+
+    /// Get the program connecting the active surface to another machine,
+    /// or null if it is local. This does not copy the value.
+    pub fn getRemoteProgram(self: *Self) ?[:0]const u8 {
+        return self.private().remote_program;
+    }
+
     /// Get the surface tree of this tab.
     pub fn getSurfaceTree(self: *Self) ?*Surface.Tree {
         const priv = self.private();
@@ -345,6 +374,10 @@ pub const Tab = extern struct {
         if (priv.tooltip) |v| {
             glib.free(@ptrCast(@constCast(v)));
             priv.tooltip = null;
+        }
+        if (priv.remote_program) |v| {
+            glib.free(@ptrCast(@constCast(v)));
+            priv.remote_program = null;
         }
         if (priv.title) |v| {
             glib.free(@ptrCast(@constCast(v)));
@@ -604,6 +637,7 @@ pub const Tab = extern struct {
                 properties.@"surface-tree".impl,
                 properties.title.impl,
                 properties.@"title-override".impl,
+                properties.@"remote-program".impl,
                 properties.tooltip.impl,
             });
 

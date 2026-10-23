@@ -781,8 +781,7 @@ pub const Application = extern struct {
             // GTK has no accessibility consumer for this yet.
             .selection_changed => {},
 
-            // GTK doesn't show the remote host yet.
-            .remote_session => {},
+            .remote_session => Action.remoteSession(target, value),
 
             .scrollbar => Action.scrollbar(target, value),
 
@@ -2753,6 +2752,18 @@ const Action = struct {
         switch (target) {
             .app => log.warn("pwd to app is unexpected", .{}),
             .surface => |surface| surface.rt_surface.gobj().setPwd(value.pwd),
+        }
+    }
+
+    pub fn remoteSession(
+        target: apprt.Target,
+        value: apprt.action.RemoteSession,
+    ) void {
+        switch (target) {
+            .app => log.warn("remote_session to app is unexpected", .{}),
+            .surface => |surface| surface.rt_surface.gobj().setRemoteProgram(
+                if (value.active) value.program else null,
+            ),
         }
     }
 

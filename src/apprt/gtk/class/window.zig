@@ -512,17 +512,12 @@ pub const Window = extern struct {
         const page = tab_view.insert(tab.as(gtk.Widget), position);
         tab_view.setSelectedPage(page);
 
-        // Create some property bindings
+        // Create some property bindings. The tooltip is set by
+        // syncTabPage since it also shows the remote session.
         _ = tab.as(gobject.Object).bindProperty(
             "title",
             page.as(gobject.Object),
             "title",
-            .{ .sync_create = true },
-        );
-        _ = tab.as(gobject.Object).bindProperty(
-            "tooltip",
-            page.as(gobject.Object),
-            "tooltip",
             .{ .sync_create = true },
         );
 
@@ -1201,6 +1196,7 @@ pub const Window = extern struct {
         }
 
         self.syncAppearance();
+        self.syncTabPages();
     }
 
     fn propIsActive(
@@ -1407,6 +1403,97 @@ pub const Window = extern struct {
         );
 
         dialog.present(self.as(gtk.Widget));
+    }
+
+    //---------------------------------------------------------------
+    // Remote session indicator
+
+    /// The icon shown for terminals connected to another machine.
+    const remote_icon_name = "network-server-symbolic";
+
+    fn remoteIndicatorVisible(config: ?*Config, program: ?[*:0]const u8) bool {
+        if (program == null) return false;
+        const c = config orelse return false;
+        return c.get().@"window-remote-indicator" == .visible;
+    }
+
+    /// Describe a terminal connected to another machine with `program`.
+    fn writeRemoteDescription(writer: *std.Io.Writer, program: []const u8) void {
+        writer.print("{s} ({s})", .{
+            std.mem.span(i18n._("Connected to another machine")),
+            program,
+        }) catch {};
+    }
+
+    /// Sync the tooltip and the remote session indicator of `page` from
+    /// its tab. When the tab's active surface is connected to another
+    /// machine, an indicator icon is shown and the tooltip says so on its
+    /// own line. (libadwaita only shows the indicator's own tooltip when
+    /// the indicator is a button.)
+    fn syncTabPage(self: *Self, page: *adw.TabPage) void {
+        const tab = gobject.ext.cast(Tab, page.getChild()) orelse return;
+        const tooltip: []const u8 = tab.getTooltip() orelse "";
+        const program: ?[:0]const u8 = program: {
+            const v = tab.getRemoteProgram() orelse break :program null;
+            if (!remoteIndicatorVisible(self.private().config, v.ptr)) break :program null;
+            break :program v;
+        };
+
+        if (program != null) {
+            const icon = gio.ThemedIcon.new(remote_icon_name);
+            defer icon.unref();
+            page.setIndicatorIcon(icon.as(gio.Icon));
+        } else {
+            page.setIndicatorIcon(null);
+        }
+
+        const alloc = Application.default().allocator();
+        var buf: std.Io.Writer.Allocating = .init(alloc);
+        defer buf.deinit();
+        buf.writer.writeAll(tooltip) catch {};
+        if (program) |p| {
+            if (tooltip.len > 0) buf.writer.writeByte('\n') catch {};
+            writeRemoteDescription(&buf.writer, p);
+        }
+        const text = buf.toOwnedSliceSentinel(0) catch return;
+        defer alloc.free(text);
+        page.setTooltip(text);
+    }
+
+    fn syncTabPages(self: *Self) void {
+        const tab_view = self.private().tab_view;
+        var i: c_int = 0;
+        while (i < tab_view.getNPages()) : (i += 1) {
+            self.syncTabPage(tab_view.getNthPage(i));
+        }
+    }
+
+    fn tabPagePropertyChanged(
+        tab: *Tab,
+        _: *gobject.ParamSpec,
+        self: *Self,
+    ) callconv(.c) void {
+        const page = self.private().tab_view.getPage(tab.as(gtk.Widget));
+        self.syncTabPage(page);
+    }
+
+    fn closureRemoteIndicatorVisible(
+        _: *Self,
+        config: ?*Config,
+        program: ?[*:0]const u8,
+    ) callconv(.c) c_int {
+        return @intFromBool(remoteIndicatorVisible(config, program));
+    }
+
+    fn closureRemoteIndicatorTooltip(
+        _: *Self,
+        program_: ?[*:0]const u8,
+    ) callconv(.c) ?[*:0]const u8 {
+        const program = program_ orelse return null;
+        var buf: [256]u8 = undefined;
+        var writer: std.Io.Writer = .fixed(&buf);
+        writeRemoteDescription(&writer, std.mem.span(program));
+        return glib.ext.dupeZ(u8, writer.buffered());
     }
 
     fn closureTitle(
@@ -1754,6 +1841,21 @@ pub const Window = extern struct {
             self,
             .{},
         );
+        _ = gobject.Object.signals.notify.connect(
+            tab,
+            *Self,
+            tabPagePropertyChanged,
+            self,
+            .{ .detail = "tooltip" },
+        );
+        _ = gobject.Object.signals.notify.connect(
+            tab,
+            *Self,
+            tabPagePropertyChanged,
+            self,
+            .{ .detail = "remote-program" },
+        );
+        self.syncTabPage(page);
 
         // Attach listeners for the surface.
         //
@@ -2404,6 +2506,8 @@ pub const Window = extern struct {
             class.bindTemplateCallback("notify_quick_terminal", &propQuickTerminal);
             class.bindTemplateCallback("notify_scale_factor", &propScaleFactor);
             class.bindTemplateCallback("titlebar_style_is_tabs", &closureTitlebarStyleIsTab);
+            class.bindTemplateCallback("remote_indicator_visible", &closureRemoteIndicatorVisible);
+            class.bindTemplateCallback("remote_indicator_tooltip", &closureRemoteIndicatorTooltip);
             class.bindTemplateCallback("computed_title", &closureTitle);
             class.bindTemplateCallback("computed_subtitle", &closureSubtitle);
 

@@ -1035,7 +1035,7 @@ class BaseTerminalController: NSWindowController,
     /// The focused surface connected to or disconnected from another machine.
     func remoteSessionDidChange(to session: Ghostty.RemoteSession?) {
         guard let window = window as? TerminalWindow else { return }
-        window.remoteSession = derivedConfig.macosTitlebarRemoteIndicator == .visible ? session : nil
+        window.remoteSession = derivedConfig.windowRemoteIndicator == .visible ? session : nil
     }
 
     func pwdDidChange(to: URL?) {
@@ -1592,14 +1592,14 @@ class BaseTerminalController: NSWindowController,
 
     private struct DerivedConfig {
         let macosTitlebarProxyIcon: Ghostty.MacOSTitlebarProxyIcon
-        let macosTitlebarRemoteIndicator: Ghostty.MacOSTitlebarRemoteIndicator
+        let windowRemoteIndicator: Ghostty.WindowRemoteIndicator
         let windowStepResize: Bool
         let focusFollowsMouse: Bool
         let splitPreserveZoom: Ghostty.Config.SplitPreserveZoom
 
         init() {
             self.macosTitlebarProxyIcon = .visible
-            self.macosTitlebarRemoteIndicator = .visible
+            self.windowRemoteIndicator = .visible
             self.windowStepResize = false
             self.focusFollowsMouse = false
             self.splitPreserveZoom = .init()
@@ -1607,7 +1607,7 @@ class BaseTerminalController: NSWindowController,
 
         init(_ config: Ghostty.Config) {
             self.macosTitlebarProxyIcon = config.macosTitlebarProxyIcon
-            self.macosTitlebarRemoteIndicator = config.macosTitlebarRemoteIndicator
+            self.windowRemoteIndicator = config.windowRemoteIndicator
             self.windowStepResize = config.windowStepResize
             self.focusFollowsMouse = config.focusFollowsMouse
             self.splitPreserveZoom = config.splitPreserveZoom

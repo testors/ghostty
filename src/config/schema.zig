@@ -441,7 +441,7 @@ fn applyOf(comptime key: []const u8) Apply {
 pub fn label(alloc: Allocator, entry: *const Entry) Allocator.Error![]const u8 {
     const overrides = std.StaticStringMap([]const u8).initComptime(.{
         .{ "macos-option-as-alt", "Option as Alt" },
-        .{ "macos-titlebar-remote-indicator", "Remote session indicator" },
+        .{ "window-remote-indicator", "Remote session indicator" },
         .{ "macos-non-native-fullscreen", "Non-native fullscreen" },
         .{ "macos-applescript", "AppleScript" },
         .{ "macos-icon", "App icon" },

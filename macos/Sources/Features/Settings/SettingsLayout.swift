@@ -97,6 +97,7 @@ enum SettingsLayout {
                     "window-decoration",
                     "window-theme",
                     "window-colorspace",
+                    "window-remote-indicator",
                     "title",
                 ]),
             ]
@@ -172,7 +173,6 @@ enum SettingsLayout {
                 Section(title: "Titlebar", keys: [
                     "macos-titlebar-style",
                     "macos-titlebar-proxy-icon",
-                    "macos-titlebar-remote-indicator",
                     "macos-window-buttons",
                 ]),
                 Section(title: "Keyboard", keys: [

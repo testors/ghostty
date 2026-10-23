@@ -18,6 +18,7 @@ template $GhosttyTab: Box {
     split_tree.active-surface as <$GhosttySurface>.pwd
     ) as <string>;
   tooltip: bind split_tree.active-surface as <$GhosttySurface>.pwd;
+  remote-program: bind split_tree.active-surface as <$GhosttySurface>.remote-program;
 
   $GhosttySplitTree split_tree {
     notify::active-surface => $notify_active_surface();
