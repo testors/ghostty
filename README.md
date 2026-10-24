@@ -21,6 +21,23 @@
   </p>
 </p>
 
+## About This Fork
+
+This repository is a personal fork of
+[Ghostty](https://github.com/ghostty-org/ghostty), maintained as
+**Ghostty+**. It is not affiliated with or endorsed by the upstream
+project.
+
+The main goal of this fork is to reduce memory usage when many terminal
+windows and tabs are open. In my own usage, memory usage dropped by more
+than half compared to upstream Ghostty. Other changes are mostly small
+quality-of-life fixes for my own workflow.
+
+Upstream Ghostty remains the canonical project. If you are looking for
+the official release, documentation, or support, use
+[ghostty.org](https://ghostty.org) and the
+[upstream repository](https://github.com/ghostty-org/ghostty).
+
 ## About
 
 Ghostty is a terminal emulator that differentiates itself by being
