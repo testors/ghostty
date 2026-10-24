@@ -288,17 +288,25 @@ pub fn lastFileEntry(self: *const Editor, key: []const u8) ?FileLine {
     return null;
 }
 
-/// The first entry for the key that came from a file.
-fn firstFileEntry(self: *const Editor, key: []const u8) ?FileLine {
+/// The files that set the key, in load order, without duplicates.
+fn filesSetting(
+    self: *const Editor,
+    alloc: Allocator,
+    key: []const u8,
+) Allocator.Error![]const []const u8 {
+    var paths: std.ArrayList([]const u8) = .empty;
     for (self.trace.entries.items) |*entry| {
         if (!std.mem.eql(u8, entry.key, key)) continue;
-        switch (entry.location) {
-            .file => |f| return .{ .path = f.path, .line = f.line },
-            .cli => {},
-        }
+        const f = switch (entry.location) {
+            .file => |f| f,
+            .cli => continue,
+        };
+        for (paths.items) |p| {
+            if (std.mem.eql(u8, p, f.path)) break;
+        } else try paths.append(alloc, f.path);
     }
 
-    return null;
+    return try paths.toOwnedSlice(alloc);
 }
 
 /// True if the effective value of the key is set by a CLI argument
@@ -352,9 +360,10 @@ pub fn set(self: *Editor, key: []const u8, value: ?[]const u8) !void {
     try self.reload();
 }
 
-/// Replace the values of a repeatable key. The values are written where
-/// the key's entries are in the first file that sets it (or appended to
-/// the main file). Entries in other files are left alone.
+/// Replace the values of a repeatable key, so that the key's entries in
+/// configuration files are exactly `values`. The values are written where
+/// the first entry for the key is (or appended to the main file) and the
+/// key's entries in every other file are removed.
 pub fn setList(self: *Editor, key: []const u8, values: []const []const u8) !void {
     _ = try self.schemaEntry(key);
     for (values) |v| try self.checkValid(key, v);
@@ -363,26 +372,37 @@ pub fn setList(self: *Editor, key: []const u8, values: []const []const u8) !void
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const path = if (self.firstFileEntry(key)) |e| e.path else self.primary_path;
-    var doc = try Document.load(alloc, path);
-    const lines = try doc.linesOf(alloc, key);
+    const setting = try self.filesSetting(alloc, key);
+    const paths: []const []const u8 = if (setting.len > 0)
+        setting
+    else
+        try alloc.dupe([]const u8, &.{self.primary_path});
 
-    var i: usize = lines.len;
-    while (i > 0) {
-        i -= 1;
-        doc.remove(lines[i], key) catch |err| return self.editFailed(err, path);
+    // Edit every file before saving any, so that a file which changed
+    // since the last reload fails the change without writing anything.
+    const docs = try alloc.alloc(Document, paths.len);
+    for (paths, docs, 0..) |path, *doc, i| {
+        doc.* = try Document.load(alloc, path);
+        const lines = try doc.linesOf(alloc, key);
+
+        var j: usize = lines.len;
+        while (j > 0) {
+            j -= 1;
+            doc.remove(lines[j], key) catch |err| return self.editFailed(err, path);
+        }
+
+        if (i > 0) continue;
+        if (lines.len > 0) {
+            // Insert where the first entry was so the user's ordering of
+            // the file is kept.
+            const at = lines[0] - 1;
+            for (values, 0..) |v, k| try doc.insertAfter(at + k, key, v);
+        } else {
+            for (values) |v| try doc.append(key, v);
+        }
     }
 
-    if (lines.len > 0) {
-        // Insert where the first entry was so the user's ordering of
-        // the file is kept.
-        const at = lines[0] - 1;
-        for (values, 0..) |v, j| try doc.insertAfter(at + j, key, v);
-    } else {
-        for (values) |v| try doc.append(key, v);
-    }
-
-    try doc.save(path);
+    for (paths, docs) |path, *doc| try doc.save(path);
     try self.reload();
 }
 
@@ -447,20 +467,7 @@ pub fn reset(self: *Editor, key: []const u8) !void {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    // The files that set this key, in load order, without duplicates.
-    var paths: std.ArrayList([]const u8) = .empty;
-    for (self.trace.entries.items) |*entry| {
-        if (!std.mem.eql(u8, entry.key, key)) continue;
-        const f = switch (entry.location) {
-            .file => |f| f,
-            .cli => continue,
-        };
-        for (paths.items) |p| {
-            if (std.mem.eql(u8, p, f.path)) break;
-        } else try paths.append(alloc, f.path);
-    }
-
-    for (paths.items) |path| {
+    for (try self.filesSetting(alloc, key)) |path| {
         var doc = try Document.load(alloc, path);
         const lines = try doc.linesOf(alloc, key);
         var i: usize = lines.len;
@@ -888,6 +895,50 @@ test "repeatable keys" {
 
     // Stale line numbers are detected.
     try testing.expectError(error.FileChanged, ed.removeEntry("keybind", p, 1));
+}
+
+test "setList replaces entries in every file" {
+    const testing = std.testing;
+    var dir: TestDir = try .init();
+    defer dir.deinit();
+    _ = try dir.write("inc", "font-family = B\n# keep\n");
+    const path = try dir.write("config", "font-family = A\nconfig-file = inc\n");
+
+    const ed = try testEditor(path);
+    defer ed.destroy();
+
+    const Check = struct {
+        fn families(e: *Editor, expected: []const []const u8) !void {
+            const entries = try e.fileEntries(testing.allocator, "font-family");
+            defer testing.allocator.free(entries);
+            try testing.expectEqual(expected.len, entries.len);
+            for (expected, entries) |want, entry| try testing.expectEqualStrings(want, entry.value.?);
+        }
+    };
+    try Check.families(ed, &.{ "A", "B" });
+
+    // Reordering moves the included entry next to the first one instead
+    // of leaving a duplicate behind in the included file.
+    try ed.setList("font-family", &.{ "B", "A" });
+    try testing.expectEqualStrings("font-family = B\nfont-family = A\nconfig-file = inc\n", try dir.read("config"));
+    try testing.expectEqualStrings("# keep\n", try dir.read("inc"));
+    try Check.families(ed, &.{ "B", "A" });
+
+    // Removing a value removes it wherever it was.
+    _ = try dir.write("inc", "font-family = C\n");
+    try ed.reload();
+    try Check.families(ed, &.{ "B", "A", "C" });
+    try ed.setList("font-family", &.{ "B", "A" });
+    try testing.expectEqualStrings("", try dir.read("inc"));
+    try Check.families(ed, &.{ "B", "A" });
+
+    // A key set only in an included file is written there.
+    _ = try dir.write("config", "config-file = inc\n");
+    _ = try dir.write("inc", "font-family = C\n");
+    try ed.reload();
+    try ed.setList("font-family", &.{ "D", "C" });
+    try testing.expectEqualStrings("config-file = inc\n", try dir.read("config"));
+    try testing.expectEqualStrings("font-family = D\nfont-family = C\n", try dir.read("inc"));
 }
 
 test "preview does not write" {
