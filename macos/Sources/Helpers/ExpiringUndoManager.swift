@@ -56,7 +56,15 @@ class ExpiringUndoManager: UndoManager {
     /// the undo manager is reset.
     override func removeAllActions() {
         super.removeAllActions()
-        expiringTargets = []
+
+        // Releasing the last reference to a target runs its deinit, which
+        // calls removeAllActions(withTarget:) and so modifies
+        // expiringTargets. Keep the old targets alive until the assignment
+        // is done, or that is a simultaneous access and the runtime aborts.
+        let expired = expiringTargets
+        withExtendedLifetime(expired) {
+            expiringTargets = []
+        }
     }
 
     /// Removes all undo and redo operations involving the specified target.
