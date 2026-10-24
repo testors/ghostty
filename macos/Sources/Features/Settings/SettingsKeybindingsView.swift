@@ -140,9 +140,24 @@ enum KeybindString {
         switch char {
         case "=": return "equal"
         case "+": return "plus"
-        case ">": return "greater"
+        // ">" separates the keys of a sequence, so a trigger can't name
+        // it. Bind the physical key that typed it instead.
+        case ">": return physicalKeyName(event.keyCode)
         default: return String(char).lowercased()
         }
+    }
+
+    /// The trigger name of a physical key, such as "intl_backslash".
+    static func physicalKeyName(_ keyCode: UInt16) -> String? {
+        guard let key = Ghostty.Input.Key(keyCode: keyCode) else { return nil }
+        // The parser takes W3C codes in snake case, which is also how
+        // the other recorded keys are written.
+        var name = ""
+        for char in key.rawValue {
+            if char.isUppercase || char.isNumber { name += "_" }
+            name += char.lowercased()
+        }
+        return name
     }
 }
 

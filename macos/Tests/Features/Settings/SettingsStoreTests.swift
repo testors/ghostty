@@ -146,6 +146,13 @@ struct KeybindStringTests {
         #expect(caps.sequence == [["⌘", "⇧", "↑"]])
         #expect(KeybindString.keycaps("ctrl+a>n").sequence == [["⌃", "A"], ["N"]])
     }
+
+    @Test func physicalKeyName() {
+        #expect(KeybindString.physicalKeyName(0x000a) == "intl_backslash")
+        #expect(KeybindString.physicalKeyName(0x0021) == "bracket_left")
+        #expect(KeybindString.physicalKeyName(0x001d) == "digit_0")
+        #expect(KeybindString.physicalKeyName(0x002f) == "period")
+    }
 }
 
 @Suite
