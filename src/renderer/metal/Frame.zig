@@ -9,6 +9,7 @@ const objc = @import("objc");
 const mtl = @import("api.zig");
 const Renderer = @import("../generic.zig").Renderer(Metal);
 const Metal = @import("../Metal.zig");
+const AtlasCache = @import("AtlasCache.zig");
 const Target = @import("Target.zig");
 const RenderPass = @import("RenderPass.zig");
 
@@ -27,8 +28,9 @@ buffer: objc.Object,
 
 block: CompletionBlock.Context,
 
-/// A shared atlas lease locks encoding through submission, never GPU waits.
-atlas_mutex: ?*std.Io.Mutex = null,
+/// The shared atlas this frame synced, if any. Its mutex is held from the
+/// sync until the buffer is committed or discarded, never across GPU waits.
+atlas: ?*AtlasCache.Entry = null,
 
 /// Begin encoding a frame.
 pub fn begin(
@@ -125,9 +127,9 @@ pub inline fn complete(self: *Self, sync: bool) void {
 
     self.buffer.msgSend(void, objc.sel("commit"), .{});
 
-    if (self.atlas_mutex) |mutex| {
-        mutex.unlock(global.io());
-        self.atlas_mutex = null;
+    if (self.atlas) |entry| {
+        entry.mutex.unlock(global.io());
+        self.atlas = null;
     }
 
     // If we need to complete synchronously, we wait until
@@ -146,9 +148,13 @@ pub inline fn complete(self: *Self, sync: bool) void {
 /// completion callback runs, so the caller still owns the frame
 /// permit. The uncommitted command buffer is dropped along with the
 /// autorelease pool that wraps `drawFrame`.
+///
+/// Atlas uploads encoded into the dropped buffer never run, so the
+/// shared atlas is invalidated before other surfaces can sync it.
 pub fn discard(self: *Self) void {
-    if (self.atlas_mutex) |mutex| {
-        mutex.unlock(global.io());
-        self.atlas_mutex = null;
+    if (self.atlas) |entry| {
+        entry.atlas.invalidate();
+        entry.mutex.unlock(global.io());
+        self.atlas = null;
     }
 }

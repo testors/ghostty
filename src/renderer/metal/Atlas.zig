@@ -66,6 +66,15 @@ pub fn deinit(self: *Atlas) void {
     self.* = .{};
 }
 
+/// Forget what the GPU textures hold, so the next `sync` uploads both
+/// atlases in full. `sync` records an upload as done once it is encoded,
+/// so a caller that drops the command buffer instead of committing it
+/// must call this before anyone else syncs.
+pub fn invalidate(self: *Atlas) void {
+    self.grayscale.modified = 0;
+    self.color.modified = 0;
+}
+
 /// The caller serializes encoding through command-buffer submission on one
 /// queue. Metal retains both staging and textures until their GPU use ends.
 pub fn sync(
@@ -226,4 +235,66 @@ test "Metal atlas ordered uploads and resource lifetime" {
             for (0..sizes[i]) |y| try testing.expectEqualSlices(u8, expected[i][j][y * row_bytes ..][0..row_bytes], bytes[y * 256 ..][0..row_bytes]);
         }
     }
+}
+
+test "Metal atlas uploads again after a dropped command buffer" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var pool = objc.AutoreleasePool.init();
+    defer pool.deinit();
+    const device = objc.Object.fromId(mtl.MTLCreateSystemDefaultDevice() orelse return error.SkipZigTest);
+    defer device.release();
+    const queue = device.msgSend(objc.Object, objc.sel("newCommandQueue"), .{});
+    defer queue.release();
+
+    var grid: font.SharedGrid = .{
+        .atlas_grayscale = try font.Atlas.init(alloc, 8, .grayscale),
+        .atlas_color = try font.Atlas.init(alloc, 8, .bgra),
+        .lock = .init,
+        .resolver = undefined,
+        .metrics = undefined,
+    };
+    defer grid.atlas_grayscale.deinit(alloc);
+    defer grid.atlas_color.deinit(alloc);
+    var atlas: Atlas = .{};
+    defer atlas.deinit();
+
+    const region: font.Atlas.Region = .{ .x = 2, .y = 1, .width = 3, .height = 2 };
+    grid.atlas_grayscale.set(region, &.{ 1, 2, 3, 4, 5, 6 });
+
+    // The upload is encoded, but the buffer is dropped without a commit,
+    // the way a discarded frame drops it.
+    const dropped = queue.msgSend(objc.Object, objc.sel("commandBuffer"), .{});
+    _ = try atlas.sync(device, &grid, dropped);
+    atlas.invalidate();
+
+    // The next sync must upload the data again rather than trust that
+    // the dropped upload ran.
+    const command = queue.msgSend(objc.Object, objc.sel("commandBuffer"), .{});
+    const texture = (try atlas.sync(device, &grid, command))[0];
+    const bytes = 256 * texture.height;
+    const readback = device.msgSend(objc.Object, objc.sel("newBufferWithLength:options:"), .{
+        @as(c_ulong, bytes), @as(mtl.MTLResourceOptions, .{ .storage_mode = .shared }),
+    });
+    defer readback.release();
+    const blit = command.msgSend(objc.Object, objc.sel("blitCommandEncoder"), .{});
+    blit.msgSend(void, objc.sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:"), .{
+        texture.texture.value,
+        @as(c_ulong, 0),
+        @as(c_ulong, 0),
+        mtl.MTLOrigin{ .x = 0, .y = 0, .z = 0 },
+        mtl.MTLSize{ .width = texture.width, .height = texture.height, .depth = 1 },
+        readback.value,
+        @as(c_ulong, 0),
+        @as(c_ulong, 256),
+        @as(c_ulong, bytes),
+    });
+    blit.msgSend(void, objc.sel("endEncoding"), .{});
+    command.msgSend(void, objc.sel("commit"), .{});
+    command.msgSend(void, objc.sel("waitUntilCompleted"), .{});
+    try testing.expectEqual(mtl.MTLCommandBufferStatus.completed, command.getProperty(mtl.MTLCommandBufferStatus, "status"));
+
+    const data = readback.msgSend([*]const u8, objc.sel("contents"), .{});
+    const size = grid.atlas_grayscale.size;
+    for (0..size) |y| try testing.expectEqualSlices(u8, grid.atlas_grayscale.data[y * size ..][0..size], data[y * 256 ..][0..size]);
 }

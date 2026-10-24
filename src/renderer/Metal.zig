@@ -360,7 +360,7 @@ pub fn syncAtlas(self: *Metal, frame: *Frame, grid: *font.SharedGrid) ![2]Textur
     const textures = try entry.atlas.sync(self.device.device, grid, frame.buffer);
     // Keep the entry locked until this buffer is committed. Merely locking
     // CPU uploads would let another surface submit a dependent draw first.
-    frame.atlas_mutex = &entry.mutex;
+    frame.atlas = entry;
     return textures;
 }
 
@@ -475,6 +475,11 @@ test "Metal discarded frame is not presented and releases its atlas lease" {
     try testing.expectEqual(@as(?*anyopaque, null), Draw.contents(&r));
     try testing.expect(r.api.atlas.?.mutex.tryLock());
     r.api.atlas.?.mutex.unlock(global.io());
+
+    // The atlas uploads in the dropped buffer never ran, so the next
+    // sync must upload both atlases in full.
+    try testing.expectEqual(@as(usize, 0), r.api.atlas.?.atlas.grayscale.modified);
+    try testing.expectEqual(@as(usize, 0), r.api.atlas.?.atlas.color.modified);
 
     // The next frame completes and presents normally.
     try Draw.run(&r, &target, &grid);
