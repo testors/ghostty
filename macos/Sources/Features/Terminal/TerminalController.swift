@@ -573,28 +573,190 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             return false
         }
 
-        // Moving the only surface onto its own tab would do nothing.
-        return source !== self || surfaceTree.isSplit
+        // A split always moves on its own.
+        if source.surfaceTree.isSplit { return true }
+
+        // An unsplit terminal brings its whole window along. The quick terminal
+        // can't give up its window, a fullscreen window can't join another tab
+        // group, and dropping onto the same window would do nothing.
+        guard source is TerminalController,
+              source.fullscreenStyle?.isFullscreen != true,
+              let sourceWindow = source.window else { return false }
+        return sourceWindow !== window && window.tabGroup?.windows.contains(sourceWindow) != true
     }
 
+    /// Moves a dragged surface into a new tab after this window's tab. A split
+    /// moves alone; an unsplit terminal brings all of its window's tabs along.
+    ///
+    /// Either way the move is a single undo action. Splitting it into the undo
+    /// actions of its parts would let closing one window purge only half of it,
+    /// which can lose the terminal or put it in two windows.
     @discardableResult
     func moveSurfaceToTab(_ surface: Ghostty.SurfaceView) -> Bool {
         guard canMoveSurfaceToTab(surface),
-              let window,
               let source = BaseTerminalController.controller(owning: surface) else { return false }
 
-        // Keep the surface alive while detaching it, even if its old window closes.
-        let tree = SplitTree<Ghostty.SurfaceView>(view: surface)
         undoManager?.beginUndoGrouping()
         defer {
             undoManager?.setActionName("Move Terminal to Tab")
             undoManager?.endUndoGrouping()
         }
 
-        source.closeSurface(surface, withConfirmation: false)
-        let controller = Self.newTab(ghostty, from: window, withSurfaceTree: tree)
-        controller?.focusSurface(surface)
-        return controller != nil
+        if source.surfaceTree.isSplit {
+            return moveSplitToTab(surface, from: source)
+        }
+
+        guard let sourceWindow = source.window else { return false }
+        return mergeTabs(of: sourceWindow, selecting: surface)
+    }
+
+    private func moveSplitToTab(_ surface: Ghostty.SurfaceView, from source: BaseTerminalController) -> Bool {
+        guard let window else { return false }
+        let oldTree = source.surfaceTree
+
+        var controller: TerminalController?
+        let move = {
+            source.closeSurface(surface, withConfirmation: false)
+            controller = Self.newTab(self.ghostty, from: window, withSurfaceTree: SplitTree(view: surface))
+        }
+        if let undoManager {
+            undoManager.disableUndoRegistration(handler: move)
+        } else {
+            move()
+        }
+
+        guard let controller else {
+            source.surfaceTree = oldTree
+            return false
+        }
+        controller.focusSurface(surface)
+
+        guard let undoManager else { return true }
+        let movedTree = source.surfaceTree
+        let expiration = undoExpiration
+        undoManager.registerUndo(withTarget: ghostty, expiresAfter: expiration) { [weak source, weak controller] ghostty in
+            // Only undo while both windows are as the move left them.
+            guard let source, let controller,
+                  source.window?.contentView != nil,
+                  controller.window?.contentView != nil,
+                  controller.surfaceTree.contains(surface),
+                  !controller.surfaceTree.isSplit,
+                  Set(source.surfaceTree.map(\.id)) == Set(movedTree.map(\.id)) else { return }
+
+            undoManager.disableUndoRegistration {
+                controller.closeTabImmediately()
+            }
+            source.surfaceTree = oldTree
+            source.focusSurface(surface)
+
+            undoManager.registerUndo(withTarget: ghostty, expiresAfter: expiration) { _ in
+                Self.redoMoveSurfaceToTab(surface, after: window)
+            }
+        }
+
+        return true
+    }
+
+    private func mergeTabs(of sourceWindow: NSWindow, selecting surface: Ghostty.SurfaceView) -> Bool {
+        guard let window else { return false }
+        let tabs = sourceWindow.tabGroup?.windows ?? [sourceWindow]
+        let frame = sourceWindow.frame
+
+        guard Self.regroupTabs(tabs, after: window, selecting: sourceWindow) else {
+            // Put back whatever AppKit managed to move.
+            Self.regroupTabs(tabs, frame: frame, selecting: sourceWindow)
+            return false
+        }
+        BaseTerminalController.controller(owning: surface)?.focusSurface(surface)
+
+        // Undo finds each tab again by a surface in it, so a tab that was
+        // closed and then brought back by undo (a new window) still counts.
+        guard let undoManager else { return true }
+        let tabSurfaces = tabs.compactMap { ($0.windowController as? BaseTerminalController)?.surfaceTree.first }
+        let expiration = undoExpiration
+        undoManager.registerUndo(withTarget: ghostty, expiresAfter: expiration) { ghostty in
+            let tabs = Self.windows(holding: tabSurfaces)
+            guard let first = tabs.first else { return }
+            let selected = BaseTerminalController.controller(owning: surface)?.window
+            Self.regroupTabs(tabs, frame: frame, selecting: selected.flatMap { tabs.contains($0) ? $0 : nil } ?? first)
+
+            undoManager.registerUndo(withTarget: ghostty, expiresAfter: expiration) { _ in
+                Self.redoMoveSurfaceToTab(surface, after: window)
+            }
+        }
+
+        return true
+    }
+
+    /// Redo goes through the same checks as a drop, since the destination may
+    /// have closed or changed (for example entered fullscreen) since the undo.
+    private static func redoMoveSurfaceToTab(_ surface: Ghostty.SurfaceView, after window: NSWindow) {
+        guard window.contentView != nil,
+              let controller = window.windowController as? TerminalController else { return }
+        controller.moveSurfaceToTab(surface)
+    }
+
+    /// The open windows that hold these surfaces now, in order and without repeats.
+    private static func windows(holding surfaces: [Ghostty.SurfaceView]) -> [NSWindow] {
+        var result: [NSWindow] = []
+        for surface in surfaces {
+            guard let window = BaseTerminalController.controller(owning: surface)?.window,
+                  window.contentView != nil,
+                  !result.contains(window) else { continue }
+            result.append(window)
+        }
+        return result
+    }
+
+    /// Moves tab windows, in order, after `anchor`. Without an anchor they form
+    /// their own window at `frame`. Returns false if AppKit refused to add a
+    /// tab; that tab is kept on screen as its own window.
+    @discardableResult
+    private static func regroupTabs(
+        _ tabs: [NSWindow],
+        after anchor: NSWindow? = nil,
+        frame: NSRect? = nil,
+        selecting selected: NSWindow
+    ) -> Bool {
+        // Grouping these moves glitches the macOS 26 titlebar tabs (see onMoveTab).
+        var titlebarTabs = false
+        if #available(macOS 26, *) {
+            titlebarTabs = selected is TitlebarTabsTahoeTerminalWindow
+        }
+        if !titlebarTabs {
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = 0
+        }
+
+        var added = true
+        var anchor = anchor
+        for tab in tabs where tab.contentView != nil {
+            tab.tabGroup?.removeWindow(tab)
+            if let anchor {
+                if !anchor.addTabbedWindowSafely(tab, ordered: .above) {
+                    added = false
+                    tab.orderFront(nil)
+                }
+            } else {
+                if let frame { tab.setFrame(frame, display: false) }
+                tab.orderFront(nil)
+            }
+            anchor = tab
+        }
+
+        if titlebarTabs {
+            DispatchQueue.main.async { selected.selectTabSafely() }
+        } else {
+            selected.selectTabSafely()
+            NSAnimationContext.endGrouping()
+        }
+
+        // Tab group changes take an event loop cycle to settle (see #1902).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            TerminalController.all.forEach { $0.relabelTabs() }
+        }
+
+        return added
     }
 
     // MARK: - Methods

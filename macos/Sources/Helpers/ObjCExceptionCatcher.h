@@ -12,6 +12,12 @@ FOUNDATION_EXPORT BOOL GhosttyAddTabbedWindowSafely(
     NSError * _Nullable * _Nullable error
 );
 
+/// Select a window in its tab group and make it key
+FOUNDATION_EXPORT BOOL GhosttySelectTabbedWindowSafely(
+    id _Nonnull window,
+    NSError * _Nullable * _Nullable error
+);
+
 /// NSWindowController.showWindow wrapper
 FOUNDATION_EXPORT BOOL GhosttyShowWindowSafely(
     id _Nonnull controller,

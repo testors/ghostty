@@ -35,6 +35,26 @@ BOOL GhosttyAddTabbedWindowSafely(
     }
 }
 
+BOOL GhosttySelectTabbedWindowSafely(
+    id window,
+    NSError * _Nullable * _Nullable error
+) {
+    // Same NSWindowStackController exception as GhosttyShowWindowSafely, for
+    // windows that already exist and were just moved into a tab group.
+    @try {
+        NSWindow *target = (NSWindow *)window;
+        target.tabGroup.selectedWindow = target;
+        [target makeKeyAndOrderFront:nil];
+        return YES;
+    } @catch (NSException *exception) {
+        if (error != NULL) {
+            *error = GhosttyErrorFromException(exception, 3);
+        }
+
+        return NO;
+    }
+}
+
 BOOL GhosttyShowWindowSafely(
     id controller,
     id _Nullable sender,

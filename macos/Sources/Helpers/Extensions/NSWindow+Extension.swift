@@ -56,6 +56,19 @@ extension NSWindow {
 
         return success
     }
+
+    /// Selects this window in its tab group and makes it key, catching the
+    /// AppKit exception that tab selection can raise around native fullscreen.
+    @discardableResult
+    func selectTabSafely() -> Bool {
+        var error: NSError?
+        let success = GhosttySelectTabbedWindowSafely(self, &error)
+        if let error {
+            Ghostty.logger.error("selecting tab failed: \(error.localizedDescription, privacy: .public)")
+        }
+
+        return success
+    }
 }
 
 extension NSWindowController {

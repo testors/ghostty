@@ -1101,8 +1101,9 @@ extension Ghostty {
             // If we had a previously focused node and its not where we're sending
             // focus, make sure that we explicitly tell it to lose focus. In theory
             // we should NOT have to do this but the focus callback isn't getting
-            // called for some reason.
-            if let from = from {
+            // called for some reason. Skip it when focus stays put: AppKit won't
+            // call becomeFirstResponder again, so the surface would stay unfocused.
+            if let from = from, from !== to {
                 _ = from.resignFirstResponder()
             }
 
