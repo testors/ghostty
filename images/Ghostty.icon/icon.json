@@ -93,6 +93,24 @@
       "blur-material" : null,
       "layers" : [
         {
+          "blend-mode" : "screen",
+          "fill" : {
+            "solid" : "srgb:0.80000,0.05000,0.40000,1.00000"
+          },
+          "glass" : false,
+          "hidden" : false,
+          "image-name" : "Ghostty.png",
+          "name" : "Lavender Ghost Tint",
+          "opacity" : 0.45,
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -185.015625,
+              -143.8359375
+            ]
+          }
+        },
+        {
           "blend-mode" : "normal",
           "fill" : "automatic",
           "glass" : false,
@@ -110,7 +128,7 @@
         {
           "blend-mode" : "normal",
           "fill" : {
-            "solid" : "extended-srgb:0.00000,0.47843,1.00000,1.00000"
+            "solid" : "extended-srgb:0.58039,0.39216,1.00000,1.00000"
           },
           "glass" : true,
           "hidden" : false,
@@ -123,6 +141,17 @@
               -143.8359375
             ]
           }
+        },
+        {
+          "blend-mode" : "screen",
+          "fill" : {
+            "solid" : "srgb:0.85000,0.05000,0.40000,1.00000"
+          },
+          "glass" : false,
+          "hidden" : false,
+          "image-name" : "Screen.png",
+          "name" : "Violet Screen Tint",
+          "opacity" : 0.65
         },
         {
           "glass" : false,
