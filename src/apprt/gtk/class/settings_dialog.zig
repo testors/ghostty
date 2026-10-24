@@ -814,6 +814,9 @@ pub const SettingsDialog = extern struct {
     const ThemeCtx = struct {
         dyn: *DynGroup,
         slot: ThemeSlot,
+        /// The theme of each combo row. Null is "Default", which resets
+        /// the theme.
+        choices: []const ?[:0]const u8,
     };
 
     fn themeNames(self: *Self) []const [:0]const u8 {
@@ -877,13 +880,28 @@ pub const SettingsDialog = extern struct {
         const alloc = self.private().arena.allocator();
         const names = self.themeNames();
 
+        var choices: std.ArrayList(?[:0]const u8) = .empty;
+        // A light and dark pair always names both themes, so only the
+        // single theme can go back to the default.
+        if (slot == .single) try choices.append(alloc, null);
+        // Keep a theme that isn't in the list (such as a path) selected
+        // as it is rather than showing another theme.
+        const listed = for (names) |name| {
+            if (std.mem.eql(u8, name, current)) break true;
+        } else false;
+        if (!listed and current.len > 0) try choices.append(alloc, try alloc.dupeSentinel(u8, current, 0));
+        for (names) |name| try choices.append(alloc, name);
+
         const row = adw.ComboRow.new();
         row.as(adw.PreferencesRow).setTitle(title);
         row.setEnableSearch(1);
         const model = gtk.StringList.new(null);
-        model.append(i18n._("Default"));
         var selected: c_uint = 0;
-        for (names, 1..) |name, i| {
+        for (choices.items, 0..) |choice, i| {
+            const name = choice orelse {
+                model.append(i18n._("Default"));
+                continue;
+            };
             model.append(name);
             if (std.mem.eql(u8, name, current)) selected = @intCast(i);
         }
@@ -891,7 +909,7 @@ pub const SettingsDialog = extern struct {
         row.setSelected(selected);
 
         const ctx = try alloc.create(ThemeCtx);
-        ctx.* = .{ .dyn = dyn, .slot = slot };
+        ctx.* = .{ .dyn = dyn, .slot = slot, .choices = choices.items };
         _ = gobject.Object.signals.notify.connect(row, *ThemeCtx, themeChanged, ctx, .{ .detail = "selected" });
         try dyn.add(row.as(gtk.Widget));
     }
@@ -903,24 +921,22 @@ pub const SettingsDialog = extern struct {
         const priv = self.private();
         const editor = priv.editor orelse return;
         const alloc = priv.arena.allocator();
-        const names = self.themeNames();
 
         const selected = row.getSelected();
-        const name: ?[]const u8 = if (selected == 0 or selected > names.len)
-            null
-        else
-            names[selected - 1];
+        if (selected >= ctx.choices.len) return;
+        const name = ctx.choices[selected];
 
         const current = parseTheme(editor.effectiveValue(alloc, "theme") catch "");
         const result = switch (ctx.slot) {
             .single => if (name) |n| editor.set("theme", n) else editor.reset("theme"),
+            // The light and dark combos have no "Default" row.
             .light => editor.set("theme", std.fmt.allocPrint(alloc, "light:{s},dark:{s}", .{
-                name orelse current.dark,
+                name orelse return,
                 current.dark,
             }) catch return),
             .dark => editor.set("theme", std.fmt.allocPrint(alloc, "light:{s},dark:{s}", .{
                 current.light,
-                name orelse current.light,
+                name orelse return,
             }) catch return),
         };
 
