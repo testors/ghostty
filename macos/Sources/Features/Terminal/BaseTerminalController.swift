@@ -1047,6 +1047,10 @@ class BaseTerminalController: NSWindowController,
         } else {
             window.representedURL = nil
         }
+
+        // The proxy icon is added/removed by AppKit when the represented URL
+        // changes. Re-sync the titlebar so the icon stays next to the title.
+        (window as? TerminalWindow)?.syncWindowTitleAppearance()
     }
 
     func cellSizeDidChange(to: NSSize) {

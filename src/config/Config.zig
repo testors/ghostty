@@ -3542,6 +3542,21 @@ keybind: Keybinds = .{},
 /// editor, etc.
 @"macos-titlebar-proxy-icon": MacTitlebarProxyIcon = .visible,
 
+/// Whether to center the window title in the macOS titlebar.
+///
+/// On macOS 26 and later, the native titlebar places the title next to
+/// the window buttons (left-aligned). Set this to `true` to center the
+/// title instead. If the proxy icon is visible, it is moved next to the
+/// title as well.
+///
+/// The default value is `false`, which follows the system behavior.
+///
+/// This setting only applies to the native macOS titlebar style.
+///
+/// This setting can be changed at runtime and will affect all currently
+/// open windows.
+@"macos-titlebar-center-title": bool = false,
+
 /// Controls the windowing behavior when dropping a file or folder
 /// onto the Ghostty icon in the macOS dock.
 ///

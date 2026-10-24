@@ -479,6 +479,12 @@ class TerminalWindow: NSWindow {
             .filter({ $0.superview?.className == "NSTitlebarView" })
     }
 
+    // The proxy icon (document button) shown in the titlebar when the
+    // window has a represented URL.
+    private func titlebarDocumentButton(in view: NSView) -> NSView? {
+        view.subviews.first { $0.className == "NSThemeDocumentButton" }
+    }
+
     // Cancellables for the frame change of the text fields in the titlebar.
     private var titlebarTextFieldFrameCancellables = Set<AnyCancellable>()
 
@@ -529,12 +535,17 @@ class TerminalWindow: NSWindow {
 
         // macOS 15 doesn't seem to need to adjust the frame.
         //
+        // On macOS 26 and later, the native title is left-aligned next to
+        // the window buttons. If `macos-titlebar-center-title` is enabled,
+        // we center it ourselves to keep the title in the middle of the
+        // titlebar.
+        //
         // When using custom font, we always expand the frame to
         // show the text properly.
         //
         // AppKit will relayout the frame when the font changes, that's
         // why we need this hack in the first place.
-        guard #available(macOS 26.0, *), titlebarFont != nil else {
+        guard #available(macOS 26.0, *) else {
             return
         }
 
@@ -565,6 +576,12 @@ class TerminalWindow: NSWindow {
     private func setWindowTitleFrameSize(_ textfield: NSTextField) {
         guard let superview = textfield.superview else { return }
 
+        let centerTitle = (NSApp.delegate as? AppDelegate)?.ghostty.config.macosTitlebarCenterTitle ?? false
+
+        // When not centering, only adjust the frame for custom fonts (the
+        // original behavior).
+        guard centerTitle || titlebarFont != nil else { return }
+
         // Button group size estimate: 92.
         // Make the available space a little bit smaller.
         let fittingSize = textfield.sizeThatFits(superview.bounds.insetBy(dx: 92/2 + 6, dy: 0).size)
@@ -572,8 +589,33 @@ class TerminalWindow: NSWindow {
         // align center vertically as well.
         let properSize = CGSize(width: fittingSize.width, height: fittingSize.height * 1.1)
 
-        guard textfield.frame.size != properSize else { return }
-        textfield.frame.size = properSize
+        if centerTitle {
+            // Center the title horizontally in the titlebar. AppKit positions
+            // the native title next to the window buttons on macOS 26 and later.
+            let properOrigin = CGPoint(
+                x: (superview.bounds.width - properSize.width) / 2,
+                y: textfield.frame.origin.y
+            )
+
+            if textfield.frame.size != properSize || textfield.frame.origin != properOrigin {
+                textfield.frame = CGRect(origin: properOrigin, size: properSize)
+            }
+
+            // Keep the proxy icon immediately to the left of the centered title.
+            if let documentButton = titlebarDocumentButton(in: superview), !documentButton.isHidden {
+                let spacing: CGFloat = 4
+                let buttonFrame = documentButton.frame
+                let buttonOrigin = CGPoint(
+                    x: properOrigin.x - buttonFrame.width - spacing,
+                    y: buttonFrame.origin.y
+                )
+                if documentButton.frame.origin != buttonOrigin {
+                    documentButton.frame.origin = buttonOrigin
+                }
+            }
+        } else if textfield.frame.size != properSize {
+            textfield.frame.size = properSize
+        }
     }
 
     /// This is called by the controller when there is a need to reset the window appearance.

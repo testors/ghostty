@@ -381,6 +381,14 @@ extension Ghostty {
             return MacOSTitlebarProxyIcon(rawValue: str) ?? defaultValue
         }
 
+        var macosTitlebarCenterTitle: Bool {
+            guard let config = self.config else { return false }
+            var v = false
+            let key = "macos-titlebar-center-title"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return v
+        }
+
         var windowRemoteIndicator: WindowRemoteIndicator {
             let defaultValue = WindowRemoteIndicator.visible
             guard let config = self.config else { return defaultValue }
