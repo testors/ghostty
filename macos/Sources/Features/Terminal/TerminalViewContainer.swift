@@ -112,7 +112,7 @@ private class TerminalGlassView: NSView, ObservableObject {
         var body: some View {
             model.color
                 .glassEffect(
-                    model.glass,
+                    model.glass?.official ?? .identity,
                     in: RoundedRectangle(cornerRadius: model.cornerRadius)
                 )
         }
@@ -122,7 +122,11 @@ private class TerminalGlassView: NSView, ObservableObject {
         @Published var backgroundColor: Color = .clear
         @Published var backgroundOpacity: Double = 0
         @Published var cornerRadius: CGFloat = 0
-        @Published var glass: Glass = .identity
+        /// The glass, or nil for none. This is a `BackportGlass` and not a
+        /// `Glass` because the Objective-C runtime can realize this class
+        /// on any macOS version (XCTest does when it looks for tests), and
+        /// the layout of a `Glass` field can't be computed before macOS 26.
+        @Published var glass: BackportGlass?
 
         /// backgroundColor applied with backgroundOpacity
         var color: Color {
@@ -164,7 +168,7 @@ private class TerminalGlassView: NSView, ObservableObject {
 
     /// Configures the glass, tint color, corner radius.
     func configure(
-        glass: Glass,
+        glass: BackportGlass,
         backgroundColor: NSColor,
         backgroundOpacity: Double,
         cornerRadius: CGFloat?,
@@ -219,7 +223,7 @@ extension TerminalViewContainer {
         }
 
         effectView.configure(
-            glass: derivedConfig.glass.official,
+            glass: derivedConfig.glass,
             backgroundColor: derivedConfig.backgroundColor,
             backgroundOpacity: derivedConfig.backgroundOpacity,
             cornerRadius: derivedConfig.cornerRadius,
