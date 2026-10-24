@@ -485,8 +485,8 @@ fn actionCommands(action: Action.Key) []const Command {
 
         .reset_window_title => comptime &.{.{
             .action = .reset_window_title,
-            .title = "Reset Window Title",
-            .description = "Reset the window title to the title set by the terminal.",
+            .title = i18n.N_("Reset Window Title"),
+            .description = i18n.N_("Reset the window title to the title set by the terminal."),
         }},
 
         .new_split => comptime &.{

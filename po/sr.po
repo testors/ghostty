@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: com.mitchellh.ghostty\n"
 "Report-Msgid-Bugs-To: m@mitchellh.com\n"
-"POT-Creation-Date: 2026-10-23 23:21+0900\n"
+"POT-Creation-Date: 2026-10-24 09:40+0900\n"
 "PO-Revision-Date: 2026-08-31 21:45+0200\n"
 "Last-Translator: Марко Костић <marko.m.kostic@gmail.com>\n"
 "Language-Team: Language SR\n"
@@ -390,17 +390,17 @@ msgstr ""
 
 #: src/apprt/gtk/class/settings_dialog.zig:391
 #: src/apprt/gtk/class/settings_dialog.zig:415
-#: src/apprt/gtk/class/settings_dialog.zig:884
+#: src/apprt/gtk/class/settings_dialog.zig:902
 msgid "Default"
 msgstr ""
 
 #: src/apprt/gtk/class/settings_dialog.zig:392
-#: src/apprt/gtk/class/settings_dialog.zig:1277
+#: src/apprt/gtk/class/settings_dialog.zig:1293
 msgid "On"
 msgstr ""
 
 #: src/apprt/gtk/class/settings_dialog.zig:393
-#: src/apprt/gtk/class/settings_dialog.zig:1278
+#: src/apprt/gtk/class/settings_dialog.zig:1294
 msgid "Off"
 msgstr ""
 
@@ -413,7 +413,7 @@ msgid "Set on the command line"
 msgstr ""
 
 #: src/apprt/gtk/class/settings_dialog.zig:626
-#: src/apprt/gtk/class/settings_dialog.zig:1058
+#: src/apprt/gtk/class/settings_dialog.zig:1074
 msgid "Remove"
 msgstr ""
 
@@ -421,54 +421,54 @@ msgstr ""
 msgid "Add a value"
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:836
-#: src/apprt/gtk/class/settings_dialog.zig:866
+#: src/apprt/gtk/class/settings_dialog.zig:839
+#: src/apprt/gtk/class/settings_dialog.zig:869
 msgid "Theme"
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:856
+#: src/apprt/gtk/class/settings_dialog.zig:859
 msgid "Different themes for light and dark mode"
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:863
+#: src/apprt/gtk/class/settings_dialog.zig:866
 msgid "Light theme"
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:864
+#: src/apprt/gtk/class/settings_dialog.zig:867
 msgid "Dark theme"
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:1015
+#: src/apprt/gtk/class/settings_dialog.zig:1031
 msgid "Your Keybindings"
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:1016
+#: src/apprt/gtk/class/settings_dialog.zig:1032
 msgid ""
 "Lines written as keybind = trigger=action. Removing a default shortcut "
 "writes trigger=unbind."
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:1018
+#: src/apprt/gtk/class/settings_dialog.zig:1034
 msgid "All Keybindings"
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:1067
+#: src/apprt/gtk/class/settings_dialog.zig:1083
 msgid "Add keybinding, e.g. ctrl+shift+t=new_tab"
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:1084
+#: src/apprt/gtk/class/settings_dialog.zig:1100
 msgid "Remove shortcut"
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:1256
+#: src/apprt/gtk/class/settings_dialog.zig:1272
 msgid "Applies to new terminals only"
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:1257
+#: src/apprt/gtk/class/settings_dialog.zig:1273
 msgid "Applies to new windows only"
 msgstr ""
 
-#: src/apprt/gtk/class/settings_dialog.zig:1258
+#: src/apprt/gtk/class/settings_dialog.zig:1274
 msgid "Requires restarting Ghostty"
 msgstr ""
 
@@ -974,6 +974,14 @@ msgstr ""
 
 #: src/input/command.zig:483
 msgid "Reset the tab title to the title set by the terminal."
+msgstr ""
+
+#: src/input/command.zig:488
+msgid "Reset Window Title"
+msgstr ""
+
+#: src/input/command.zig:489
+msgid "Reset the window title to the title set by the terminal."
 msgstr ""
 
 #: src/input/command.zig:496
