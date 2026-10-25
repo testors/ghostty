@@ -4173,6 +4173,7 @@ pub fn default(alloc_gpa: Allocator) Allocator.Error!Config {
         .regex = url.regex,
         .action = .{ .open = {} },
         .highlight = .{ .hover_mods = inputpkg.ctrlOrSuper(.{}) },
+        .validate_paths = true,
     });
 
     return result;

@@ -257,6 +257,11 @@ const Mouse = struct {
     /// True if the mouse position is currently over a link.
     over_link: bool = false,
 
+    /// True from a super+click press on a link until the left button is
+    /// released. The program never sees any part of that click, even if
+    /// it captures the mouse.
+    link_click: bool = false,
+
     /// The last x/y in the cursor position for links. We use this to
     /// only process link hover events when the mouse actually moves cells.
     link_point: ?terminal.point.Coordinate = null,
@@ -346,6 +351,11 @@ const DerivedConfig = struct {
     links: []DerivedConfig.Link,
     link_osc8: bool,
     link_previews: configpkg.LinkPreviews,
+
+    /// The user's home directory, for "~/" in link paths. Not config, but
+    /// looked up here so it's done once.
+    home_dir: ?[]const u8,
+
     scroll_to_bottom: configpkg.Config.ScrollToBottom,
     notify_on_command_finish: configpkg.Config.NotifyOnCommandFinish,
     notify_on_command_finish_action: configpkg.Config.NotifyOnCommandFinishAction,
@@ -356,6 +366,7 @@ const DerivedConfig = struct {
         regex: oni.Regex,
         action: input.Link.Action,
         highlight: input.Link.Highlight,
+        validate_paths: bool,
     };
 
     pub fn init(alloc_gpa: Allocator, config: *const configpkg.Config) !DerivedConfig {
@@ -374,6 +385,7 @@ const DerivedConfig = struct {
                     .regex = regex,
                     .action = link.action,
                     .highlight = link.highlight,
+                    .validate_paths = link.validate_paths,
                 });
             }
 
@@ -383,6 +395,12 @@ const DerivedConfig = struct {
             for (links) |*link| link.regex.deinit();
             alloc.free(links);
         }
+
+        const home_dir: ?[]const u8 = home: {
+            var environ_map = global.environMap() catch break :home null;
+            defer environ_map.deinit();
+            break :home try internal_os.homeAlloc(alloc, global.io(), &environ_map);
+        };
 
         return .{
             .original_font_size = config.@"font-size",
@@ -427,6 +445,7 @@ const DerivedConfig = struct {
             .links = links,
             .link_osc8 = config.@"link-osc8",
             .link_previews = config.@"link-previews",
+            .home_dir = home_dir,
             .scroll_to_bottom = config.@"scroll-to-bottom",
             .notify_on_command_finish = config.@"notify-on-command-finish",
             .notify_on_command_finish_action = config.@"notify-on-command-finish-action",
@@ -2871,13 +2890,8 @@ pub fn keyCallback(
         // Update our modifiers, this will update mouse mods too
         self.modsChanged(event.mods);
 
-        // We only refresh links if
-        // 1. mouse reporting is off
-        // OR
-        // 2. mouse reporting is on and we are not reporting shift to the terminal
-        if (self.io.terminal.flags.mouse_event == .none or
-            (self.mouse.mods.shift and !self.mouseShiftCapture(false)))
-        {
+        // We only refresh links if we look for them under the mouse.
+        if (self.mouseLinksEnabled()) {
             // Refresh our link state
             const pos = self.rt_surface.getCursorPos() catch break :mouse_mods;
             self.renderer_state.mutex.lockUncancelable(global.io());
@@ -3913,6 +3927,16 @@ fn mouseShiftCapture(self: *const Surface, lock: bool) bool {
     };
 }
 
+/// Returns true if we look for links under the mouse. A program that
+/// captures the mouse gets every click, except when shift escapes the
+/// capture or super is held. Mouse reports can't encode super, so a
+/// super+click means nothing to the program and we use it for links.
+fn mouseLinksEnabled(self: *const Surface) bool {
+    if (self.io.terminal.flags.mouse_event == .none) return true;
+    if (self.mouse.mods.shift and !self.mouseShiftCapture(false)) return true;
+    return self.mouse.mods.super;
+}
+
 /// Returns true if the mouse is currently captured by the terminal
 /// (i.e. reporting events).
 pub fn mouseCaptured(self: *Surface) bool {
@@ -3949,6 +3973,12 @@ pub fn mouseButtonCallback(
 
     // Update our modifiers if they changed
     self.modsChanged(mods);
+
+    // A left release always ends a link click. See Mouse.link_click.
+    const link_click_release = button == .left and
+        action == .release and
+        self.mouse.link_click;
+    if (link_click_release) self.mouse.link_click = false;
 
     // This is set to true if the terminal is allowed to capture the shift
     // modifier. Note we can do this more efficiently probably with less
@@ -4071,6 +4101,18 @@ pub fn mouseButtonCallback(
             // If we have shift-pressed and we aren't allowed to capture it,
             // then we do not do a mouse report.
             if (mods.shift and !shift_capture) break :report;
+
+            // A super+click on a link is ours: the release opens the link,
+            // so the program sees neither half of the click.
+            if (link_click_release) break :report;
+            if (button == .left and
+                action == .press and
+                self.mouse.mods.super and
+                self.mouse.over_link)
+            {
+                self.mouse.link_click = true;
+                break :report;
+            }
 
             // In any other mouse button scenario without shift pressed we
             // clear the selection since the underlying application can handle
@@ -4524,8 +4566,30 @@ fn linkAtPin(
         while (true) {
             var match = (try it.next()) orelse break;
             defer match.deinit();
-            const sel = match.selection();
+            var sel = match.selection();
             if (!sel.contains(screen, mouse_pin)) continue;
+
+            if (link.validate_paths) {
+                const start = match.offset + @as(usize, @intCast(match.region.starts()[0]));
+                const end = match.offset + @as(usize, @intCast(match.region.ends()[0]));
+                const len = configpkg.url.linkLen(
+                    global.io(),
+                    strmap.string[start..end],
+                    .{
+                        .pwd = self.io.terminal.getPwd(),
+                        .home = self.config.home_dir,
+                    },
+                ) orelse continue;
+
+                // If we kept less than the match, the rest may hold
+                // another link, so search it next.
+                if (start + len < end) {
+                    it.offset = start + len;
+                    sel = .init(sel.start(), strmap.map.get(start + len - 1).?, false);
+                    if (!sel.contains(screen, mouse_pin)) continue;
+                }
+            }
+
             return .{
                 .action = link.action,
                 .selection = sel,
@@ -4770,14 +4834,11 @@ pub fn cursorPosCallback(
     // 2. the cursor position has changed (either we have no previous state, or the state has
     //    changed)
     // AND
-    // 1. mouse reporting is off
-    // OR
-    // 2. mouse reporting is on and we are not reporting shift to the terminal
+    // we look for links under the mouse (see mouseLinksEnabled)
     if ((over_link or
         self.mouse.link_point == null or
         (self.mouse.link_point != null and !self.mouse.link_point.?.eql(pos_vp))) and
-        (self.io.terminal.flags.mouse_event == .none or
-            (self.mouse.mods.shift and !self.mouseShiftCapture(false))))
+        self.mouseLinksEnabled())
     {
         // If we were previously over a link, we always update. We do this so that if the text
         // changed underneath us, even if the mouse didn't move, we update the URL hints and state
@@ -4786,6 +4847,9 @@ pub fn cursorPosCallback(
 
     // Do a mouse report
     if (self.isMouseReporting()) report: {
+        // The program never saw this click's press. See Mouse.link_click.
+        if (self.mouse.link_click) break :report;
+
         // Shift overrides mouse "grabbing" in the window, taken from Kitty.
         // This only applies if there is a mouse button pressed so that
         // movement reports are not affected.

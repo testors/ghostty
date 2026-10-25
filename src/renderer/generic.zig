@@ -648,6 +648,10 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             bg_image_fit: configpkg.BackgroundImageFit,
             bg_image_repeat: bool,
             links: link.Set,
+
+            /// The user's home directory, for "~/" in link paths.
+            home_dir: ?[]const u8,
+
             vsync: bool,
             colorspace: configpkg.Config.WindowColorspace,
             blending: configpkg.Config.AlphaBlending,
@@ -688,6 +692,12 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     config.link.links.items,
                 );
 
+                const home_dir: ?[]const u8 = home: {
+                    var environ_map = global.environMap() catch break :home null;
+                    defer environ_map.deinit();
+                    break :home try os.homeAlloc(alloc, global.io(), &environ_map);
+                };
+
                 return .{
                     .background_opacity = @max(0, @min(1, config.@"background-opacity")),
                     .background_opacity_cells = config.@"background-opacity-cells",
@@ -723,6 +733,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     .bg_image_fit = config.@"background-image-fit",
                     .bg_image_repeat = config.@"background-image-repeat",
                     .links = links,
+                    .home_dir = home_dir,
                     .vsync = config.@"window-vsync",
                     .colorspace = config.@"window-colorspace",
                     .blending = config.@"alpha-blending",
@@ -1488,6 +1499,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             const Critical = struct {
                 links: terminal.RenderState.CellSet,
                 mouse: renderer.State.Mouse,
+                pwd: ?[]const u8,
                 preedit: ?renderer.State.Preedit,
                 scrollbar: terminal.Scrollbar,
                 overlay_features: []const Overlay.Feature,
@@ -1640,9 +1652,17 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     ) catch &.{};
                 };
 
+                // Link paths are checked against the pwd outside the
+                // critical area, so copy it.
+                const pwd: ?[]const u8 = if (state.terminal.getPwd()) |v|
+                    try arena_alloc.dupe(u8, v)
+                else
+                    null;
+
                 break :critical .{
                     .links = links,
                     .mouse = state.mouse,
+                    .pwd = pwd,
                     .preedit = preedit,
                     .scrollbar = scrollbar,
                     .overlay_features = overlay_features,
@@ -1662,6 +1682,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 &self.terminal_state,
                 state.mouse.point,
                 state.mouse.mods,
+                .{ .pwd = critical.pwd, .home = self.config.home_dir },
             ) catch |err| {
                 log.warn("error searching for regex links err={}", .{err});
             };

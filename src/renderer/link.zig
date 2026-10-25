@@ -2,7 +2,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const oni = @import("oniguruma");
+const global = @import("../global.zig");
 const inputpkg = @import("../input.zig");
+const url = @import("../config/url.zig");
 const terminal = @import("../terminal/main.zig");
 const point = terminal.point;
 const Screen = terminal.Screen;
@@ -17,6 +19,9 @@ pub const Link = struct {
 
     /// The situations in which the link should be highlighted.
     highlight: inputpkg.Link.Highlight,
+
+    /// See `inputpkg.Link.validate_paths`.
+    validate_paths: bool,
 
     pub fn deinit(self: *Link) void {
         self.regex.deinit();
@@ -57,6 +62,7 @@ pub const Set = struct {
             try links.append(alloc, .{
                 .regex = regex,
                 .highlight = link.highlight,
+                .validate_paths = link.validate_paths,
             });
         }
 
@@ -68,7 +74,8 @@ pub const Set = struct {
         alloc.free(self.links);
     }
 
-    /// Fills matches with the matches from regex link matches.
+    /// Fills matches with the matches from regex link matches. `paths`
+    /// is used to check the matches of links with `validate_paths`.
     pub fn renderCellMap(
         self: *const Set,
         alloc: Allocator,
@@ -76,6 +83,7 @@ pub const Set = struct {
         render_state: *const terminal.RenderState,
         mouse_viewport: ?point.Coordinate,
         mouse_mods: inputpkg.Mods,
+        paths: url.PathContext,
     ) !void {
         // Fast path, not very likely since we have default links.
         if (self.links.len == 0) return;
@@ -119,20 +127,26 @@ pub const Set = struct {
                 const offset_start: usize = @intCast(region.starts()[0]);
                 const offset_end: usize = @intCast(region.ends()[0]);
                 const start = offset + offset_start;
-                const end = offset + offset_end;
+                var end = offset + offset_end;
 
                 // Increment our offset by the number of bytes in the match.
                 // We defer this so that we can return the match before
                 // modifying the offset.
                 defer offset = end;
 
-                switch (link.highlight) {
-                    .always, .always_mods => {},
-                    .hover, .hover_mods => if (mouse_viewport) |vp| {
-                        for (map.items[start..end]) |pt| {
-                            if (pt.eql(vp)) break;
-                        } else continue;
-                    } else continue,
+                // Hover links only highlight the match under the mouse.
+                const hover = switch (link.highlight) {
+                    .always, .always_mods => false,
+                    .hover, .hover_mods => true,
+                };
+                if (hover and !containsPoint(map.items[start..end], mouse_viewport)) continue;
+
+                if (link.validate_paths) {
+                    // If we keep less than the match, the rest may hold
+                    // another link, so we search it next.
+                    const len = url.linkLen(global.io(), str[start..end], paths) orelse continue;
+                    end = start + len;
+                    if (hover and !containsPoint(map.items[start..end], mouse_viewport)) continue;
                 }
 
                 // Record the match
@@ -143,6 +157,12 @@ pub const Set = struct {
         }
     }
 };
+
+fn containsPoint(points: []const point.Coordinate, target: ?point.Coordinate) bool {
+    const t = target orelse return false;
+    for (points) |pt| if (pt.eql(t)) return true;
+    return false;
+}
 
 test "renderCellMap" {
     const testing = std.testing;
@@ -187,6 +207,7 @@ test "renderCellMap" {
         &result,
         &state,
         null,
+        .{},
         .{},
     );
     try testing.expect(!result.contains(.{ .x = 0, .y = 0 }));
@@ -242,6 +263,7 @@ test "renderCellMap hover links" {
             &state,
             null,
             .{},
+            .{},
         );
 
         // Test our matches
@@ -262,6 +284,7 @@ test "renderCellMap hover links" {
             &result,
             &state,
             .{ .x = 1, .y = 0 },
+            .{},
             .{},
         );
 
@@ -330,6 +353,7 @@ test "renderCellMap inactive links don't allocate" {
         &state,
         null,
         .{},
+        .{},
     );
 
     try testing.expectEqual(@as(usize, 0), result.count());
@@ -379,6 +403,7 @@ test "renderCellMap mods no match" {
         &state,
         null,
         .{},
+        .{},
     );
 
     // Test our matches
@@ -388,4 +413,71 @@ test "renderCellMap mods no match" {
     try testing.expect(!result.contains(.{ .x = 3, .y = 0 }));
     try testing.expect(!result.contains(.{ .x = 1, .y = 1 }));
     try testing.expect(!result.contains(.{ .x = 1, .y = 2 }));
+}
+
+test "renderCellMap trims paths to what exists" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, "Repos");
+    try tmp.dir.createDirPath(io, "blah/blah");
+    var root_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const root = root_buf[0..try tmp.dir.realPath(io, &root_buf)];
+    var pwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const pwd = try std.mem.print(&pwd_buf, "{s}/Repos", .{root});
+
+    var t: terminal.Terminal = try .init(io, alloc, .{
+        .cols = 40,
+        .rows = 3,
+    });
+    defer t.deinit(alloc);
+
+    var s = t.vtStream();
+    defer s.deinit();
+    // "../blah/blah" is x=4 to x=15, "input/output" is x=4 to x=15.
+    s.nextSlice("see ../blah/blah for details\r\nsee input/output");
+
+    var state: terminal.RenderState = .empty;
+    defer state.deinit(alloc);
+    try state.update(alloc, &t);
+
+    var set = try Set.fromConfig(alloc, &.{.{
+        .regex = url.regex,
+        .action = .{ .open = {} },
+        .highlight = .{ .hover = {} },
+        .validate_paths = true,
+    }});
+    defer set.deinit(alloc);
+
+    const paths: url.PathContext = .{ .pwd = pwd };
+
+    // Hovering the path highlights only the part that exists.
+    {
+        var result: terminal.RenderState.CellSet = .empty;
+        defer result.deinit(alloc);
+        try set.renderCellMap(alloc, &result, &state, .{ .x = 5, .y = 0 }, .{}, paths);
+        try testing.expect(!result.contains(.{ .x = 3, .y = 0 }));
+        try testing.expect(result.contains(.{ .x = 4, .y = 0 }));
+        try testing.expect(result.contains(.{ .x = 15, .y = 0 }));
+        try testing.expect(!result.contains(.{ .x = 17, .y = 0 }));
+    }
+
+    // Hovering the words after it highlights nothing.
+    {
+        var result: terminal.RenderState.CellSet = .empty;
+        defer result.deinit(alloc);
+        try set.renderCellMap(alloc, &result, &state, .{ .x = 17, .y = 0 }, .{}, paths);
+        try testing.expectEqual(@as(usize, 0), result.count());
+    }
+
+    // A bare path without a dot isn't a link unless it exists.
+    {
+        var result: terminal.RenderState.CellSet = .empty;
+        defer result.deinit(alloc);
+        try set.renderCellMap(alloc, &result, &state, .{ .x = 5, .y = 1 }, .{}, paths);
+        try testing.expectEqual(@as(usize, 0), result.count());
+    }
 }

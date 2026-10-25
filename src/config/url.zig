@@ -106,12 +106,132 @@ const bare_relative_path_branch =
     path_chars ++ "+" ++
     no_trailing_colon;
 
+// Branch 4: Bare relative paths without a dot such as src/config. These
+// look just like words joined by a slash ("and/or"), so they are only
+// links if they exist on disk. See `linkLen`.
+const bare_undotted_path_branch =
+    bare_relative_path_prefix ++
+    path_chars ++ "+" ++
+    no_trailing_colon;
+
 pub const regex =
     scheme_url_branch ++
     "|" ++
     rooted_or_relative_path_branch ++
     "|" ++
-    bare_relative_path_branch;
+    bare_relative_path_branch ++
+    "|" ++
+    bare_undotted_path_branch;
+
+/// What `linkLen` needs to find paths on disk.
+pub const PathContext = struct {
+    /// The terminal's working directory, for relative paths.
+    pwd: ?[]const u8 = null,
+
+    /// The user's home directory, for paths starting with "~/".
+    home: ?[]const u8 = null,
+};
+
+/// Returns how many bytes of `match`, a match of `regex`, are the link,
+/// or null if the match isn't a link.
+///
+/// The regex can't tell where a path ends in prose. Directory matches
+/// take the words after them ("../src for details"), and text glued to
+/// the end comes along too, such as a Korean particle ("~/src에서") or
+/// the period ending a sentence. So for paths this returns the longest
+/// prefix that exists on disk, cutting only at spaces and inside the
+/// punctuation or non-ASCII text that ends each word.
+///
+/// If no prefix exists, or the path can't be checked (a relative path
+/// with no known pwd, or one using a $VARIABLE), the full match is kept.
+/// The exception is bare paths without a dot such as "src/config", which
+/// are only links if they exist.
+pub fn linkLen(io: std.Io, match: []const u8, ctx: PathContext) ?usize {
+    // Scheme URLs ("https://", "mailto:") have a colon before any slash.
+    // Paths never do.
+    const slash = std.mem.indexOfScalar(u8, match, '/') orelse return match.len;
+    if (std.mem.indexOfScalar(u8, match[0..slash], ':') != null) return match.len;
+    if (std.mem.indexOfScalar(u8, match, '$') != null) return match.len;
+
+    // A dot makes a bare path look like a file ("src/main.zig"), but not
+    // the period ending a sentence.
+    const must_exist = switch (match[0]) {
+        '/', '.', '~' => false,
+        else => std.mem.indexOfScalar(
+            u8,
+            std.mem.trimEnd(u8, match, trailing_punctuation),
+            '.',
+        ) == null,
+    };
+    const fallback: ?usize = if (must_exist) null else match.len;
+
+    const root: PathRoot = if (match[0] == '/')
+        .{ .dir = "", .skip = 0 }
+    else if (std.mem.startsWith(u8, match, "~/"))
+        .{ .dir = ctx.home orelse return fallback, .skip = 1 }
+    else
+        .{ .dir = ctx.pwd orelse return fallback, .skip = 0 };
+    if (root.dir.len > 0 and !std.fs.path.isAbsolute(root.dir)) return fallback;
+
+    if (root.exists(io, match)) return match.len;
+
+    // Walk back one codepoint at a time. `trimming` is true while
+    // everything between here and the end of the word could be text
+    // that follows the path rather than part of it.
+    var trimming = true;
+    var i = match.len;
+    while (i > slash + 1) {
+        var j = i - 1;
+        while (j > 0 and match[j] & 0xC0 == 0x80) j -= 1;
+        i = j;
+
+        const c = match[j];
+        if (c == ' ') {
+            trimming = true;
+        } else if (!trimming or !trailingText(c)) {
+            trimming = false;
+            continue;
+        }
+
+        // Paths don't end with a space, and we never shorten one to
+        // just its root, such as "~/" or "../".
+        const candidate = match[0..j];
+        if (candidate[j - 1] == ' ') continue;
+        if (std.mem.indexOfNone(u8, candidate[slash + 1 ..], "./") == null) continue;
+        if (root.exists(io, candidate)) return j;
+    }
+
+    return fallback;
+}
+
+/// Where a path from `linkLen` is found on disk.
+const PathRoot = struct {
+    /// The absolute directory the path is in, or empty for absolute paths.
+    dir: []const u8,
+
+    /// Leading bytes of the path to replace with `dir`, such as "~".
+    skip: usize,
+
+    fn exists(self: PathRoot, io: std.Io, path: []const u8) bool {
+        var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        var writer: std.Io.Writer = .fixed(&buf);
+        const rest = path[self.skip..];
+        writer.writeAll(self.dir) catch return false;
+        if (self.dir.len > 0 and rest[0] != '/') writer.writeByte('/') catch return false;
+        writer.writeAll(rest) catch return false;
+        std.Io.Dir.accessAbsolute(io, writer.buffered(), .{}) catch return false;
+        return true;
+    }
+};
+
+/// Punctuation that can be written right after a path.
+const trailing_punctuation = ".:;!?*#@&+=%~";
+
+/// Returns true if `c` can be text written right after a path:
+/// punctuation or the first byte of a non-ASCII character.
+fn trailingText(c: u8) bool {
+    return c >= 0x80 or std.mem.indexOfScalar(u8, trailing_punctuation, c) != null;
+}
 
 test "url regex" {
     const testing = std.testing;
@@ -474,6 +594,26 @@ test "url regex" {
             .input = "./Downloads: Operation not permitted",
             .expect = "./Downloads",
         },
+        // bare relative paths without any dot match here, but are only
+        // links if they exist (see linkLen)
+        .{
+            .input = "input/output",
+            .expect = "input/output",
+        },
+        .{
+            .input = "cd src/config",
+            .expect = "src/config",
+        },
+        // comma should not let dot detection look past it
+        .{
+            .input = "foo/bar,baz.txt",
+            .expect = "foo/bar",
+        },
+        // directories take the words after them, which linkLen trims
+        .{
+            .input = "see ../blah/blah for details",
+            .expect = "../blah/blah for details",
+        },
     };
 
     for (cases) |case| {
@@ -490,15 +630,10 @@ test "url regex" {
     }
 
     const no_match_cases = [_][]const u8{
-        // bare relative paths without any dot should not match as file paths
-        "input/output",
-        "foo/bar",
         // $-numeric character should not match
         "$10/bar",
         "$10/$20",
         "$10/bar.txt",
-        // comma should not let dot detection look past it
-        "foo/bar,baz.txt",
         // $VAR should not match mid-word
         "foo$BAR/baz.txt",
         // ~ should not match mid-word
@@ -513,5 +648,93 @@ test "url regex" {
             reg.deinit();
             return error.TestUnexpectedResult;
         } else |_| {}
+    }
+}
+
+test "linkLen" {
+    const testing = std.testing;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, "Repos/ghostty");
+    try tmp.dir.createDirPath(io, "blah/blah");
+    try tmp.dir.createDirPath(io, "문서/보고서");
+    try tmp.dir.createDirPath(io, "src");
+    try tmp.dir.writeFile(io, .{ .sub_path = "src/foo.zig", .data = "" });
+
+    var root_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const root = root_buf[0..try tmp.dir.realPath(io, &root_buf)];
+    var repos_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const repos = try std.mem.print(&repos_buf, "{s}/Repos", .{root});
+
+    // The tmp dir stands in for both the home directory and the pwd.
+    const at_root: PathContext = .{ .pwd = root, .home = root };
+    const at_repos: PathContext = .{ .pwd = repos, .home = root };
+    const unknown: PathContext = .{};
+
+    const Case = struct {
+        ctx: PathContext,
+        input: []const u8,
+        expect: ?[]const u8,
+    };
+    const cases = [_]Case{
+        // URLs are never checked
+        .{ .ctx = at_root, .input = "https://example.com/a", .expect = "https://example.com/a" },
+        .{ .ctx = at_root, .input = "mailto:test@example.com", .expect = "mailto:test@example.com" },
+
+        // existing paths are kept whole
+        .{ .ctx = at_root, .input = "~/Repos/ghostty", .expect = "~/Repos/ghostty" },
+        .{ .ctx = at_root, .input = "blah/blah", .expect = "blah/blah" },
+        .{ .ctx = at_repos, .input = "../blah/blah", .expect = "../blah/blah" },
+
+        // trailing words and glued text are trimmed off
+        .{ .ctx = at_root, .input = "~/Repos/ghostty에서 작업", .expect = "~/Repos/ghostty" },
+        .{ .ctx = at_root, .input = "~/Repos/ghostty 에서", .expect = "~/Repos/ghostty" },
+        .{ .ctx = at_root, .input = "~/Repos/ghostty.", .expect = "~/Repos/ghostty" },
+        .{ .ctx = at_root, .input = "~/Repos/ghostty**", .expect = "~/Repos/ghostty" },
+        .{ .ctx = at_root, .input = "~/Repos/ghostty/에서", .expect = "~/Repos/ghostty/" },
+        .{ .ctx = at_repos, .input = "../blah/blah for details", .expect = "../blah/blah" },
+        .{ .ctx = at_root, .input = "blah/blah를", .expect = "blah/blah" },
+        .{ .ctx = at_root, .input = "blah/blah.", .expect = "blah/blah" },
+        .{ .ctx = at_root, .input = "~/문서/보고서에서", .expect = "~/문서/보고서" },
+        .{ .ctx = at_root, .input = "src/foo.zig에서", .expect = "src/foo.zig" },
+
+        // letters and digits aren't trimmed, so line numbers stay
+        .{ .ctx = at_root, .input = "src/foo.zig:42", .expect = "src/foo.zig:42" },
+        .{ .ctx = at_root, .input = "~/Repos/ghost", .expect = "~/Repos/ghost" },
+
+        // paths that don't exist or can't be checked are kept whole
+        .{ .ctx = at_root, .input = "/nonexistent/thing for details", .expect = "/nonexistent/thing for details" },
+        .{ .ctx = at_root, .input = "~/에서", .expect = "~/에서" },
+        .{ .ctx = at_root, .input = "$HOME/Repos/ghostty에서", .expect = "$HOME/Repos/ghostty에서" },
+        .{ .ctx = unknown, .input = "~/Repos/ghostty에서", .expect = "~/Repos/ghostty에서" },
+        .{ .ctx = unknown, .input = "../blah/blah for details", .expect = "../blah/blah for details" },
+
+        // ...except bare paths without a dot, which must exist
+        .{ .ctx = at_root, .input = "input/output", .expect = null },
+        .{ .ctx = at_root, .input = "foo/bar", .expect = null },
+        .{ .ctx = at_root, .input = "input/output.", .expect = null },
+        .{ .ctx = at_repos, .input = "blah/blah", .expect = null },
+        .{ .ctx = unknown, .input = "blah/blah", .expect = null },
+    };
+
+    for (cases) |case| {
+        const len = linkLen(io, case.input, case.ctx);
+        if (case.expect) |expect| {
+            const actual = case.input[0 .. len orelse {
+                std.debug.print("input: {s} expected: {s} got: null\n", .{ case.input, expect });
+                return error.TestUnexpectedResult;
+            }];
+            testing.expectEqualStrings(expect, actual) catch |err| {
+                std.debug.print("input: {s}\n", .{case.input});
+                return err;
+            };
+        } else {
+            testing.expectEqual(@as(?usize, null), len) catch |err| {
+                std.debug.print("input: {s}\n", .{case.input});
+                return err;
+            };
+        }
     }
 }

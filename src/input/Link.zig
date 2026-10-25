@@ -21,6 +21,11 @@ action: Action,
 /// when the link is clickable.
 highlight: Highlight,
 
+/// Check path matches against the filesystem with `config.url.linkLen`,
+/// which trims them to the part that exists. Only for the default URL
+/// regex, whose matches it knows how to read.
+validate_paths: bool = false,
+
 pub const Action = union(enum) {
     /// Open the full matched value using the default open program.
     /// For example, on macOS this is "open" and on Linux this is "xdg-open".
@@ -68,6 +73,7 @@ pub fn clone(self: *const Link, alloc: Allocator) Allocator.Error!Link {
         .regex = try alloc.dupe(u8, self.regex),
         .action = self.action,
         .highlight = self.highlight,
+        .validate_paths = self.validate_paths,
     };
 }
 
@@ -75,5 +81,6 @@ pub fn clone(self: *const Link, alloc: Allocator) Allocator.Error!Link {
 pub fn equal(self: *const Link, other: *const Link) bool {
     return std.meta.eql(self.action, other.action) and
         std.meta.eql(self.highlight, other.highlight) and
+        self.validate_paths == other.validate_paths and
         std.mem.eql(u8, self.regex, other.regex);
 }

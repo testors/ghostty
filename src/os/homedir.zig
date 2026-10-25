@@ -22,6 +22,18 @@ pub inline fn home(io: std.Io, environ_map: *const std.process.Environ.Map, buf:
     };
 }
 
+/// Like `home`, but allocates the result and returns null on any error,
+/// for callers that treat an unknown home directory as missing.
+pub fn homeAlloc(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+) std.mem.Allocator.Error!?[]const u8 {
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const result = (home(io, environ_map, &buf) catch return null) orelse return null;
+    return try alloc.dupe(u8, result);
+}
+
 fn homeUnix(io: std.Io, environ_map: *const std.process.Environ.Map, buf: []u8) !?[]const u8 {
     // First: if we have a HOME env var, then we use that.
     if (environ_map.get("HOME")) |result| {
