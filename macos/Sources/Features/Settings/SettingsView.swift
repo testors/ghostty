@@ -17,6 +17,12 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
+                // Not `.searchable`: it makes the sidebar icons blink when
+                // the window opens. See SettingsSearchField.
+                SettingsSearchField(text: $search)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+
                 List(selection: $selection) {
                     Section {
                         ForEach(SettingsCategory.visible) { category in
@@ -35,7 +41,6 @@ struct SettingsView: View {
 
                 ConfigFileFooter(store: store)
             }
-            .searchable(text: $search, placement: .sidebar, prompt: "Search settings")
             .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
         } detail: {
             VStack(spacing: 0) {
@@ -77,6 +82,52 @@ struct SettingsView: View {
                     .id(category)
             }
         }
+    }
+}
+
+/// The search field at the top of the sidebar.
+///
+/// This is a plain text field with its own flat background on purpose.
+/// Don't replace it with `.searchable(placement: .sidebar)`, an
+/// `NSSearchField`, or a `TextField` with the `.roundedBorder` style. On
+/// macOS 26, with any of those in the sidebar, the sidebar icons disappear
+/// for a few frames (about 80 ms) right after the window opens, so they
+/// visibly blink every time Settings is opened.
+///
+/// What we know:
+/// - Only the sidebar icons drop out. Their labels, the window, and the
+///   layout stay the same. The blink happens even when layout has fully
+///   settled before the window is shown, so it isn't a resize.
+/// - A plain `Text` in the same spot doesn't cause it, and neither does
+///   a text field in the detail pane. It doesn't depend on focus or on
+///   the terminal window.
+/// - The fields that cause it all draw their background as Liquid Glass,
+///   which is the likely trigger. A plain field with a flat background
+///   doesn't.
+struct SettingsSearchField: View {
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search settings", text: $text)
+                .textFieldStyle(.plain)
+                .onExitCommand { text = "" }
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Label("Clear Search", systemImage: "xmark.circle.fill")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
     }
 }
 
