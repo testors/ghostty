@@ -10,30 +10,33 @@ enum SettingsPage: Hashable {
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
     @State private var selection: SettingsPage? = .category(.general)
+    /// The page shown. Unlike the sidebar selection, it is never nil.
+    @State private var page: SettingsPage = .category(.general)
     @State private var search = ""
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selection) {
-                Section {
-                    ForEach(SettingsCategory.visible) { category in
-                        NavigationLink(value: SettingsPage.category(category)) {
-                            Label(category.title, systemImage: category.systemImage)
+            VStack(spacing: 0) {
+                List(selection: $selection) {
+                    Section {
+                        ForEach(SettingsCategory.visible) { category in
+                            NavigationLink(value: SettingsPage.category(category)) {
+                                Label(category.title, systemImage: category.systemImage)
+                            }
+                        }
+                    }
+
+                    Section {
+                        NavigationLink(value: SettingsPage.all) {
+                            Label("All Settings", systemImage: "list.bullet")
                         }
                     }
                 }
 
-                Section {
-                    NavigationLink(value: SettingsPage.all) {
-                        Label("All Settings", systemImage: "list.bullet")
-                    }
-                }
+                ConfigFileFooter(store: store)
             }
             .searchable(text: $search, placement: .sidebar, prompt: "Search settings")
             .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
-            .safeAreaInset(edge: .bottom) {
-                ConfigFileFooter(store: store)
-            }
         } detail: {
             VStack(spacing: 0) {
                 SettingsBanners(store: store)
@@ -41,9 +44,20 @@ struct SettingsView: View {
             }
             .frame(minWidth: 520, minHeight: 400)
         }
-        .environment(\.settingsNavigate) { page in
+        .onChange(of: selection) { newValue in
+            guard let newValue else {
+                // Cmd-click deselects the row; keep the shown page selected.
+                selection = page
+                return
+            }
+
+            // Picking a page in the sidebar leaves the search results.
+            page = newValue
             search = ""
-            selection = page
+        }
+        .environment(\.settingsNavigate) { target in
+            search = ""
+            selection = target
         }
     }
 
@@ -53,7 +67,7 @@ struct SettingsView: View {
         if !query.isEmpty {
             SearchResultsView(store: store, query: query)
         } else {
-            switch selection ?? .category(.general) {
+            switch page {
             case .all:
                 AllSettingsView(store: store)
             case .category(.keybindings):
@@ -66,37 +80,45 @@ struct SettingsView: View {
     }
 }
 
-/// The main config file and a button to open it, below the sidebar.
+/// The main config file and actions to open it, below the sidebar.
 struct ConfigFileFooter: View {
     @ObservedObject var store: SettingsStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             Divider()
-            Text((store.primaryPath as NSString).lastPathComponent)
-                .font(.system(.caption, design: .monospaced))
-            Text((store.primaryPath as NSString).deletingLastPathComponent.replacingOccurrences(
-                of: NSHomeDirectory(), with: "~"))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            HStack {
-                Button("Open in Editor") { store.openInEditor() }
-                    .controlSize(.small)
-                Button {
-                    store.revealInFinder()
-                } label: {
-                    Image(systemName: "folder")
+            HStack(spacing: 6) {
+                Text((store.primaryPath as NSString).lastPathComponent)
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(store.primaryPath)
+                Spacer(minLength: 4)
+                iconButton("Open in Editor", systemImage: "square.and.pencil") {
+                    store.openInEditor()
                 }
-                .controlSize(.small)
-                .help("Show in Finder")
-                .accessibilityLabel("Show in Finder")
+                iconButton("Show in Finder", systemImage: "folder") {
+                    store.revealInFinder()
+                }
             }
-            .padding(.top, 2)
+            .buttonStyle(.borderless)
+            .controlSize(.small)
         }
         .padding(.horizontal, 12)
-        .padding(.bottom, 10)
+        .padding(.bottom, 8)
+    }
+
+    /// An icon-only button whose title is its tooltip and accessibility label.
+    private func iconButton(
+        _ title: LocalizedStringKey,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+        }
+        .help(title)
     }
 }
 

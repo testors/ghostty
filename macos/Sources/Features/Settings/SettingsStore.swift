@@ -326,9 +326,23 @@ final class SettingsStore: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
+    /// Show a configuration file in Finder, or the nearest folder that
+    /// exists if the file hasn't been created yet.
     func revealInFinder(path: String? = nil) {
         let target = path ?? primaryPath
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: target)])
+        guard !target.isEmpty else { return }
+        var url = URL(fileURLWithPath: target)
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: url.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            return
+        }
+
+        // The path is absolute, so this stops at "/" at the latest.
+        while !fileManager.fileExists(atPath: url.path) {
+            url.deleteLastPathComponent()
+        }
+        NSWorkspace.shared.open(url)
     }
 
     private func refresh() {
