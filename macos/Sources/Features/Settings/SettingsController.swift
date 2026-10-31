@@ -48,6 +48,21 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    // MARK: First Responder
+
+    @IBAction func close(_ sender: Any) {
+        window?.performClose(sender)
+    }
+
+    @IBAction func closeWindow(_ sender: Any) {
+        window?.performClose(sender)
+    }
+
+    /// This is called when "escape" is pressed.
+    @objc func cancel(_ sender: Any?) {
+        close(sender)
+    }
+
     // MARK: NSWindowDelegate
 
     func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
