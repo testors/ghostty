@@ -138,9 +138,10 @@ pub const PathContext = struct {
 /// The regex can't tell where a path ends in prose. Directory matches
 /// take the words after them ("../src for details"), and text glued to
 /// the end comes along too, such as a Korean particle ("~/src에서") or
-/// the period ending a sentence. So for paths this returns the longest
+/// the period ending a sentence. Line numbers ("src/main.zig:42:10") name
+/// a file that doesn't exist either. So for paths this returns the longest
 /// prefix that exists on disk, cutting only at spaces and inside the
-/// punctuation or non-ASCII text that ends each word.
+/// punctuation, non-ASCII text or ":<number>" parts that end each word.
 ///
 /// If no prefix exists, or the path can't be checked (a relative path
 /// with no known pwd, or one using a $VARIABLE), the full match is kept.
@@ -188,6 +189,17 @@ pub fn linkLen(io: std.Io, match: []const u8, ctx: PathContext) ?usize {
         const c = match[j];
         if (c == ' ') {
             trimming = true;
+        } else if (trimming and std.ascii.isDigit(c)) {
+            // A line or column number after a path, such as ":42" in
+            // "src/main.zig:42:10". Skip to its colon, which is tried next.
+            var k = j;
+            while (k > 0 and std.ascii.isDigit(match[k - 1])) k -= 1;
+            if (k > 0 and match[k - 1] == ':') {
+                i = k;
+                continue;
+            }
+            trimming = false;
+            continue;
         } else if (!trimming or !trailingText(c)) {
             trimming = false;
             continue;
@@ -614,6 +626,11 @@ test "url regex" {
             .input = "see ../blah/blah for details",
             .expect = "../blah/blah for details",
         },
+        // grep -n output; linkLen trims the line number
+        .{
+            .input = "/Users/x/Repos/ghostty/build.zig:447:        .optimize = optimize,",
+            .expect = "/Users/x/Repos/ghostty/build.zig:447",
+        },
     };
 
     for (cases) |case| {
@@ -700,8 +717,16 @@ test "linkLen" {
         .{ .ctx = at_root, .input = "~/문서/보고서에서", .expect = "~/문서/보고서" },
         .{ .ctx = at_root, .input = "src/foo.zig에서", .expect = "src/foo.zig" },
 
-        // letters and digits aren't trimmed, so line numbers stay
-        .{ .ctx = at_root, .input = "src/foo.zig:42", .expect = "src/foo.zig:42" },
+        // line and column numbers are trimmed off
+        .{ .ctx = at_root, .input = "src/foo.zig:42", .expect = "src/foo.zig" },
+        .{ .ctx = at_root, .input = "src/foo.zig:42:10", .expect = "src/foo.zig" },
+        .{ .ctx = at_root, .input = "src/foo.zig:42에서", .expect = "src/foo.zig" },
+        .{ .ctx = at_root, .input = "~/src/foo.zig:42", .expect = "~/src/foo.zig" },
+        .{ .ctx = at_root, .input = "blah/blah:42", .expect = "blah/blah" },
+        .{ .ctx = at_root, .input = "/nonexistent/foo.zig:42", .expect = "/nonexistent/foo.zig:42" },
+
+        // other letters and digits aren't trimmed
+        .{ .ctx = at_root, .input = "src/foo.zig42", .expect = "src/foo.zig42" },
         .{ .ctx = at_root, .input = "~/Repos/ghost", .expect = "~/Repos/ghost" },
 
         // paths that don't exist or can't be checked are kept whole
