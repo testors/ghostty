@@ -1220,7 +1220,7 @@ pub const SettingsDialog = extern struct {
                 .{ .title = "Scrollback", .keys = &.{ "scrollback-limit-bytes", "scrollbar", "scroll-to-bottom" } },
             },
             .mouse => &.{
-                .{ .title = "Mouse", .keys = &.{ "mouse-hide-while-typing", "mouse-scroll-multiplier", "focus-follows-mouse", "right-click-action", "middle-click-action" } },
+                .{ .title = "Mouse", .keys = &.{ "mouse-hide-while-typing", "mouse-scroll-multiplier", "focus-follows-mouse", "right-click-action", "middle-click-action", "mouse-reporting-reset-at-prompt" } },
                 .{ .title = "Clipboard", .keys = &.{ "copy-on-select", "clipboard-read", "clipboard-write", "clipboard-paste-protection" } },
             },
             .quick_terminal => &.{

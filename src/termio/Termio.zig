@@ -200,6 +200,7 @@ pub const DerivedConfig = struct {
     enquiry_response: []const u8,
     xt_checksum_report: bool,
     xt_checksum_extension: terminalpkg.xt_checksum.Flags,
+    mouse_reporting_reset_at_prompt: bool,
     conditional_state: configpkg.ConditionalState,
 
     pub fn init(
@@ -239,6 +240,7 @@ pub const DerivedConfig = struct {
             .enquiry_response = try alloc.dupe(u8, config.@"enquiry-response"),
             .xt_checksum_report = config.@"vt-xt-checksum-report",
             .xt_checksum_extension = xtChecksumFlags(config.@"vt-xt-checksum-extension"),
+            .mouse_reporting_reset_at_prompt = config.@"mouse-reporting-reset-at-prompt",
             .conditional_state = config._conditional_state,
 
             // This has to be last so that we copy AFTER the arena allocations
@@ -331,6 +333,7 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
         .clipboard_write_limit = opts.config.clipboard_write_limit,
         .enquiry_response = opts.config.enquiry_response,
         .xt_checksum_report = opts.config.xt_checksum_report,
+        .mouse_reporting_reset_at_prompt = opts.config.mouse_reporting_reset_at_prompt,
     };
 
     const thread_enter_state = try ThreadEnterState.create(
@@ -935,6 +938,7 @@ test "processOutput title-only updates do not wake the renderer" {
             .clipboard_write = .deny,
             .clipboard_write_limit = 1024,
             .xt_checksum_report = false,
+            .mouse_reporting_reset_at_prompt = true,
         },
     });
     defer t.terminal_stream.deinit();
@@ -996,4 +1000,73 @@ test "processOutput title-only updates do not wake the renderer" {
         // Color changes can also send surface messages; keep the queue drained.
         while (app_mailbox.pop(global.io())) |_| {}
     }
+}
+
+test "processOutput new prompt turns off leftover mouse reporting" {
+    const testing = std.testing;
+    const App = @import("../App.zig");
+    if (apprt.runtime != apprt.none) return error.SkipZigTest;
+
+    var wakeup = try xev.Async.init();
+    defer wakeup.deinit();
+
+    var rt_app: apprt.App = .{};
+    var app_mailbox: App.Mailbox.Queue = .{};
+    var renderer_mailbox: renderer.Thread.Mailbox = .{};
+    var mutex: std.Io.Mutex = .init;
+    var t: Termio = undefined;
+    var state: renderer.State = .{ .mutex = &mutex, .terminal = &t.terminal };
+    t.alloc = testing.allocator;
+    t.terminal = try .init(global.io(), testing.allocator, .{ .cols = 80, .rows = 24 });
+    defer t.terminal.deinit(testing.allocator);
+    t.renderer_state = &state;
+    t.renderer_mailbox = &renderer_mailbox;
+    t.last_cursor_reset = null;
+    t.mailbox = try .initSPSC(testing.allocator);
+    defer t.mailbox.deinit(testing.allocator);
+    t.terminal_stream = .init(.{
+        .allocator = testing.allocator,
+        .handler = .{
+            .alloc = testing.allocator,
+            .size = &t.size,
+            .terminal = &t.terminal,
+            .termio_mailbox = &t.mailbox,
+            .surface_mailbox = .{
+                .surface = undefined,
+                .app = .{ .rt_app = &rt_app, .mailbox = &app_mailbox },
+            },
+            .renderer_state = &state,
+            .renderer_mailbox = &renderer_mailbox,
+            .renderer_wakeup = wakeup,
+            .enquiry_response = "",
+            .osc_color_report_format = .@"16-bit",
+            .clipboard_write = .deny,
+            .clipboard_write_limit = 1024,
+            .xt_checksum_report = false,
+            .mouse_reporting_reset_at_prompt = true,
+        },
+    });
+    defer t.terminal_stream.deinit();
+
+    // What tmux leaves on when its ssh connection drops, then the
+    // local shell's next prompt.
+    const leftover = "\x1b[?1003h\x1b[?1006h";
+    const prompt = "\x1b]133;A\x07";
+
+    t.processOutput(leftover);
+    try testing.expectEqual(.any, t.terminal.flags.mouse_event);
+    t.processOutput(prompt);
+    try testing.expectEqual(.none, t.terminal.flags.mouse_event);
+    try testing.expectEqual(.x10, t.terminal.flags.mouse_format);
+    try testing.expectEqual(.text, t.terminal.mouse_shape);
+
+    // With the option off, the prompt leaves mouse reporting alone.
+    t.terminal_stream.handler.mouse_reporting_reset_at_prompt = false;
+    t.processOutput(leftover);
+    t.processOutput(prompt);
+    try testing.expectEqual(.any, t.terminal.flags.mouse_event);
+    try testing.expectEqual(.sgr, t.terminal.flags.mouse_format);
+
+    while (app_mailbox.pop(global.io())) |_| {}
+    while (renderer_mailbox.pop(global.io())) |_| {}
 }

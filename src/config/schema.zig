@@ -476,6 +476,7 @@ pub fn label(alloc: Allocator, entry: *const Entry) Allocator.Error![]const u8 {
         .{ "window-padding-y", "Vertical padding" },
         .{ "window-padding-balance", "Balance padding" },
         .{ "window-padding-color", "Padding color" },
+        .{ "mouse-reporting-reset-at-prompt", "Reset mouse reporting at prompt" },
     });
     if (overrides.get(entry.key)) |v| return try alloc.dupe(u8, v);
 

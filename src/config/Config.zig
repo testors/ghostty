@@ -1008,6 +1008,20 @@ palette: Palette = .{},
 /// action.
 @"mouse-reporting": bool = true,
 
+/// Turn off mouse reporting when the shell shows a new prompt.
+///
+/// A program that turns on mouse reporting and exits without turning it
+/// off (for example tmux or vim when an ssh connection drops) leaves it on.
+/// The shell then receives every click and drag as typed text such as
+/// `35;106;9M`, until you run `reset`. When this is `true` (the default),
+/// Ghostty turns mouse reporting off as soon as the shell marks a new
+/// prompt, so the mouse works normally again.
+///
+/// This relies on prompt marks (OSC 133), which shell integration emits.
+/// Set this to `false` if a program you use turns on mouse reporting for
+/// its own prompt and also emits prompt marks.
+@"mouse-reporting-reset-at-prompt": bool = true,
+
 /// Multiplier for scrolling distance with the mouse wheel.
 ///
 /// A prefix of `precision:` or `discrete:` can be used to set the multiplier

@@ -5165,6 +5165,32 @@ pub fn fullReset(self: *Terminal) void {
     self.flags.dirty.clear = true;
 }
 
+/// Turn off mouse reporting and return to the default report format,
+/// as if the program had reset every mouse mode itself. Returns true
+/// if mouse events were being reported.
+///
+/// A program that dies without cleaning up (for example when an ssh
+/// connection drops) leaves mouse reporting on, and the shell then
+/// receives every click and drag as typed text.
+pub fn resetMouseTracking(self: *Terminal) bool {
+    const mouse_modes = [_]modespkg.Mode{
+        .mouse_event_x10,
+        .mouse_event_normal,
+        .mouse_event_button,
+        .mouse_event_any,
+        .mouse_format_utf8,
+        .mouse_format_sgr,
+        .mouse_format_urxvt,
+        .mouse_format_sgr_pixels,
+    };
+    for (mouse_modes) |mode| self.modes.set(mode, false);
+
+    const was_tracking = self.flags.mouse_event != .none;
+    self.flags.mouse_event = .none;
+    self.flags.mouse_format = .x10;
+    return was_tracking;
+}
+
 /// DECSTR - Soft Terminal Reset. Resets the modes and state a program may
 /// have left behind, without clearing the screen or moving the cursor.
 /// Beyond what the VT510 manual lists, this also resets what xterm's soft
@@ -16642,6 +16668,26 @@ test "Terminal: fullReset default modes" {
     try testing.expect(t.modes.get(.grapheme_cluster));
     t.fullReset();
     try testing.expect(t.modes.get(.grapheme_cluster));
+}
+
+test "Terminal: resetMouseTracking turns off reports and format" {
+    var t = try init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
+    defer t.deinit(testing.allocator);
+
+    // What tmux leaves on: any-event tracking with SGR reports.
+    t.modes.set(.mouse_event_any, true);
+    t.modes.set(.mouse_format_sgr, true);
+    t.flags.mouse_event = .any;
+    t.flags.mouse_format = .sgr;
+
+    try testing.expect(t.resetMouseTracking());
+    try testing.expectEqual(.none, t.flags.mouse_event);
+    try testing.expectEqual(.x10, t.flags.mouse_format);
+    try testing.expect(!t.modes.get(.mouse_event_any));
+    try testing.expect(!t.modes.get(.mouse_format_sgr));
+
+    // Nothing left to turn off.
+    try testing.expect(!t.resetMouseTracking());
 }
 
 test "Terminal: fullReset tracked pins" {

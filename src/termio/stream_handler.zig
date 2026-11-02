@@ -59,6 +59,10 @@ pub const StreamHandler = struct {
     /// and XTCHECKSUM may change how it's calculated.
     xt_checksum_report: bool,
 
+    /// Whether a new prompt turns off mouse reporting left on by a
+    /// program that exited without cleaning up.
+    mouse_reporting_reset_at_prompt: bool,
+
     //---------------------------------------------------------------
     // Internal state
 
@@ -129,6 +133,7 @@ pub const StreamHandler = struct {
         self.clipboard_write_limit = config.clipboard_write_limit;
         self.enquiry_response = config.enquiry_response;
         self.xt_checksum_report = config.xt_checksum_report;
+        self.mouse_reporting_reset_at_prompt = config.mouse_reporting_reset_at_prompt;
         self.terminal.setDefaultCursorStyle(config.cursor_style);
         self.terminal.setDefaultCursorBlink(config.cursor_blink);
         self.terminal.setDefaultXtChecksum(config.xt_checksum_extension);
@@ -1500,13 +1505,23 @@ pub const StreamHandler = struct {
                 self.surfaceMessageWriter(.{ .stop_command = code });
             },
 
+            // A shell drawing its prompt never wants mouse reports, so
+            // any still on were left by a program that died without
+            // cleaning up (e.g. tmux or vim over a dropped ssh). Turn
+            // them off so clicks and drags stop typing garbage.
+            .fresh_line_new_prompt,
+            .new_command,
+            .prompt_start,
+            => if (self.mouse_reporting_reset_at_prompt and
+                self.terminal.resetMouseTracking())
+            {
+                try self.setMouseShape(.text);
+            },
+
             // Handled by Terminal, no special handling by us
             .end_prompt_start_input,
             .end_prompt_start_input_terminate_eol,
             .fresh_line,
-            .fresh_line_new_prompt,
-            .new_command,
-            .prompt_start,
             => {},
         }
 

@@ -128,6 +128,7 @@ enum SettingsLayout {
                     "focus-follows-mouse",
                     "right-click-action",
                     "middle-click-action",
+                    "mouse-reporting-reset-at-prompt",
                 ]),
                 Section(title: "Clipboard", keys: [
                     "copy-on-select",
