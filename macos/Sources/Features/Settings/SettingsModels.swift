@@ -82,23 +82,34 @@ struct SettingSchema: Decodable, Identifiable, Hashable {
             self = Apply(rawValue: raw) ?? .live
         }
 
-        /// A short note for settings that don't apply to open terminals
-        /// right away. Shown as the tooltip of `systemImage`.
-        var note: String? {
+        /// The badge text for settings that don't apply to open terminals
+        /// right away.
+        var badge: String? {
             switch self {
             case .live: return nil
-            case .newTerminal: return "Applies to new terminals only"
-            case .newWindow: return "Applies to new windows only"
-            case .restart: return "Requires restarting Ghostty"
+            case .newTerminal: return "New terminals only"
+            case .newWindow: return "New windows only"
+            case .restart: return "Restart required"
             }
         }
 
-        /// The icon shown next to the setting's name.
+        /// The badge's tooltip.
+        var note: String? {
+            switch self {
+            case .live: return nil
+            case .newTerminal: return "Terminals that are already open keep the old value. New tabs, splits and windows use the new one."
+            case .newWindow: return "Windows that are already open keep the old value. New windows use the new one."
+            case .restart: return "Takes effect after Ghostty is restarted."
+            }
+        }
+
+        /// The badge's icon.
         var systemImage: String? {
             switch self {
             case .live: return nil
-            case .newTerminal, .newWindow: return "n.circle"
-            case .restart: return "arrow.clockwise.circle"
+            case .newTerminal: return "plus.square.on.square"
+            case .newWindow: return "macwindow.badge.plus"
+            case .restart: return "arrow.clockwise"
             }
         }
     }
@@ -125,6 +136,12 @@ struct SettingSchema: Decodable, Identifiable, Hashable {
 
     /// The default value as a single string (scalar keys).
     var defaultValue: String { defaultValues.first ?? "" }
+
+    /// The default value for display.
+    var defaultDescription: String {
+        defaultValues.isEmpty || defaultValue.isEmpty
+            ? "(none)" : defaultValues.prefix(3).joined(separator: ", ")
+    }
 
     /// True if the text matches this setting for search.
     func matches(_ query: String) -> Bool {

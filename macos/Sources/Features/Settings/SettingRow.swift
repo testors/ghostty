@@ -25,6 +25,7 @@ struct SettingRow: View {
     var title: String?
 
     @State private var showingDoc = false
+    @State private var hovering = false
 
     private var modified: Bool { store.isModified(setting.key) }
     private var lockedByCLI: Bool { store.isSetByCLI(setting.key) }
@@ -48,15 +49,12 @@ struct SettingRow: View {
         }
         .contextMenu { menu }
         .help(setting.summary)
+        .onHover { hovering = $0 }
     }
 
     private var label: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Circle()
-                .fill(modified ? Color.accentColor : Color.clear)
-                .frame(width: 6, height: 6)
-                .accessibilityLabel(modified ? "Changed from default" : "")
-                .help(modified ? "Changed from default" : "")
+            modifiedMark
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -77,13 +75,6 @@ struct SettingRow: View {
                     .popover(isPresented: $showingDoc, arrowEdge: .trailing) {
                         SettingDocView(store: store, setting: setting)
                     }
-
-                    if let note = setting.apply.note, let icon = setting.apply.systemImage {
-                        Image(systemName: icon)
-                            .foregroundStyle(.orange)
-                            .help(note)
-                            .accessibilityLabel(note)
-                    }
                 }
 
                 badges
@@ -91,12 +82,42 @@ struct SettingRow: View {
         }
     }
 
-    /// Where the value comes from, when that's not the main config file.
+    /// A dot when the setting is changed from its default. Hovering the
+    /// row turns it into a button that resets the setting.
+    private var modifiedMark: some View {
+        let showReset = modified && hovering
+        return Circle()
+            .fill(modified && !showReset ? Color.accentColor : Color.clear)
+            .frame(width: 6, height: 6)
+            .overlay {
+                if showReset {
+                    Button { store.reset(setting.key) } label: {
+                        Image(systemName: "arrow.uturn.backward.circle.fill")
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.borderless)
+                    .fixedSize()
+                    .help("Reset to default: \(setting.defaultDescription)")
+                }
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Changed from default")
+            .accessibilityAction(named: "Reset to Default") { store.reset(setting.key) }
+            .accessibilityHidden(!modified)
+    }
+
+    /// When the setting applies, and where the value comes from when that's
+    /// not the main config file.
     @ViewBuilder
     private var badges: some View {
         let otherFile = store.isSetInOtherFile(setting.key) ? store.origin(setting.key) : nil
-        if otherFile != nil || lockedByCLI {
+        let apply = setting.apply
+        if apply.badge != nil || otherFile != nil || lockedByCLI {
             HStack(spacing: 4) {
+                if let text = apply.badge, let icon = apply.systemImage {
+                    SettingBadge(text: text, systemImage: icon, tint: apply == .restart ? .orange : .secondary)
+                        .help(apply.note ?? "")
+                }
                 if let otherFile {
                     SettingBadge(text: otherFile.locationDescription, systemImage: "doc", tint: .blue)
                         .help("Set in \(otherFile.path ?? ""). Changes are saved there.")
@@ -169,8 +190,7 @@ struct SettingDocView: View {
             HStack {
                 Text("Default: ")
                     .foregroundColor(.secondary) +
-                Text(setting.defaultValues.isEmpty || setting.defaultValue.isEmpty
-                     ? "(none)" : setting.defaultValues.prefix(3).joined(separator: ", "))
+                Text(setting.defaultDescription)
                     .font(.system(.callout, design: .monospaced))
                 Spacer()
                 if store.isModified(setting.key) {
