@@ -8,6 +8,10 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
 
     private var store: SettingsStore?
 
+    /// The smallest size of the window. It is tall enough to show every
+    /// page in the sidebar.
+    private static let minSize = NSSize(width: 760, height: 540)
+
     init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 640),
@@ -17,7 +21,8 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
         )
         window.title = "Settings"
         window.toolbarStyle = .unified
-        window.minSize = NSSize(width: 760, height: 480)
+        // This also keeps a smaller saved frame from being restored.
+        window.minSize = Self.minSize
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.identifier = NSUserInterfaceItemIdentifier("com.mitchellh.ghostty.settings")
@@ -38,7 +43,18 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
             let store = SettingsStore(app: app)
             self.store = store
             let host = NSHostingController(rootView: SettingsView(store: store))
-            window?.contentViewController = host
+            // Keep SwiftUI from sizing the window. It sets the window's
+            // minimum size from the content, but measures the sidebar
+            // lazily, so the minimum grew after the window was shown and
+            // the window grew with it on the next click or focus change.
+            // windowWillResize keeps the minimum size instead.
+            host.sizingOptions = []
+            if let window {
+                // Setting the content view controller resizes the window to
+                // the view's size, which is empty here. Keep the frame.
+                host.view.setFrameSize(window.contentRect(forFrameRect: window.frame).size)
+                window.contentViewController = host
+            }
         } else {
             store?.reloadFromDisk()
         }
@@ -67,6 +83,14 @@ final class SettingsController: NSWindowController, NSWindowDelegate {
 
     func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
         MainActor.assumeIsolated { store?.undoManager }
+    }
+
+    /// Keeps the minimum size, which SwiftUI clears. See show(app:).
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        NSSize(
+            width: max(frameSize.width, Self.minSize.width),
+            height: max(frameSize.height, Self.minSize.height)
+        )
     }
 
     func windowWillClose(_ notification: Notification) {
