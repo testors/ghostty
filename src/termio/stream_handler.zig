@@ -1503,6 +1503,20 @@ pub const StreamHandler = struct {
                 };
 
                 self.surfaceMessageWriter(.{ .stop_command = code });
+
+                // The command is gone, so an alternate screen, hidden
+                // cursor, focus reports, or keyboard protocol still on was
+                // left by a program that died without cleaning up (e.g.
+                // vim over a dropped ssh). Undo them, or the shell gets
+                // keys like Ctrl+D as text such as `100;5u`. We do this
+                // at the command end rather than the next prompt because
+                // some shells (e.g. nushell) turn the keyboard protocol on
+                // for their own line editor before they mark the prompt.
+                if (self.terminal.resetCommandLeftovers()) |was_on| {
+                    if (was_on) log.info("undid terminal modes left on by the last command", .{});
+                } else |err| {
+                    log.warn("error undoing modes left on by the last command err={}", .{err});
+                }
             },
 
             // A shell drawing its prompt never wants mouse reports, so

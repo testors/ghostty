@@ -1070,3 +1070,78 @@ test "processOutput new prompt turns off leftover mouse reporting" {
     while (app_mailbox.pop(global.io())) |_| {}
     while (renderer_mailbox.pop(global.io())) |_| {}
 }
+
+test "processOutput command end undoes modes a dead program left on" {
+    const testing = std.testing;
+    const App = @import("../App.zig");
+    if (apprt.runtime != apprt.none) return error.SkipZigTest;
+
+    var wakeup = try xev.Async.init();
+    defer wakeup.deinit();
+
+    var rt_app: apprt.App = .{};
+    var app_mailbox: App.Mailbox.Queue = .{};
+    var renderer_mailbox: renderer.Thread.Mailbox = .{};
+    var mutex: std.Io.Mutex = .init;
+    var t: Termio = undefined;
+    var state: renderer.State = .{ .mutex = &mutex, .terminal = &t.terminal };
+    t.alloc = testing.allocator;
+    t.terminal = try .init(global.io(), testing.allocator, .{ .cols = 80, .rows = 24 });
+    defer t.terminal.deinit(testing.allocator);
+    t.renderer_state = &state;
+    t.renderer_mailbox = &renderer_mailbox;
+    t.last_cursor_reset = null;
+    t.mailbox = try .initSPSC(testing.allocator);
+    defer t.mailbox.deinit(testing.allocator);
+    t.terminal_stream = .init(.{
+        .allocator = testing.allocator,
+        .handler = .{
+            .alloc = testing.allocator,
+            .size = &t.size,
+            .terminal = &t.terminal,
+            .termio_mailbox = &t.mailbox,
+            .surface_mailbox = .{
+                .surface = undefined,
+                .app = .{ .rt_app = &rt_app, .mailbox = &app_mailbox },
+            },
+            .renderer_state = &state,
+            .renderer_mailbox = &renderer_mailbox,
+            .renderer_wakeup = wakeup,
+            .enquiry_response = "",
+            .osc_color_report_format = .@"16-bit",
+            .clipboard_write = .deny,
+            .clipboard_write_limit = 1024,
+            .xt_checksum_report = false,
+            .mouse_reporting_reset_at_prompt = true,
+        },
+    });
+    defer t.terminal_stream.deinit();
+
+    // A shell that turns the Kitty protocol on for its line editor and
+    // then marks its prompt keeps it.
+    t.processOutput("\x1b[>1u\x1b]133;A\x07");
+    try testing.expect(t.terminal.screens.active.kitty_keyboard.current().disambiguate);
+
+    // The shell turns it off and runs ssh. The remote vim enters the
+    // alternate screen, hides the cursor, and turns on focus reports,
+    // the Kitty protocol, and modifyOtherKeys, then the connection drops.
+    t.processOutput("\x1b[<u\x1b]133;C\x07");
+    t.processOutput("\x1b[?1049h\x1b[?25l\x1b[?1004h\x1b[>1u\x1b[>4;2m");
+    try testing.expectEqual(.alternate, t.terminal.screens.active_key);
+    try testing.expect(!t.terminal.modes.get(.cursor_visible));
+    try testing.expect(t.terminal.modes.get(.focus_event));
+    try testing.expect(t.terminal.screens.active.kitty_keyboard.current().disambiguate);
+    try testing.expect(t.terminal.flags.modify_other_keys_2);
+
+    // The shell marks the end of ssh.
+    t.processOutput("\x1b]133;D;255\x07");
+    try testing.expectEqual(.primary, t.terminal.screens.active_key);
+    try testing.expect(!t.terminal.modes.get(.alt_screen_save_cursor_clear_enter));
+    try testing.expect(t.terminal.modes.get(.cursor_visible));
+    try testing.expect(!t.terminal.modes.get(.focus_event));
+    try testing.expectEqual(0, t.terminal.screens.active.kitty_keyboard.current().int());
+    try testing.expect(!t.terminal.flags.modify_other_keys_2);
+
+    while (app_mailbox.pop(global.io())) |_| {}
+    while (renderer_mailbox.pop(global.io())) |_| {}
+}

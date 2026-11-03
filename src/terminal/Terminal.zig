@@ -5191,6 +5191,58 @@ pub fn resetMouseTracking(self: *Terminal) bool {
     return was_tracking;
 }
 
+/// Undo what a program that dies without cleaning up (for example when
+/// an ssh connection drops) leaves on for the shell that runs next:
+///
+///   - The alternate screen, which hides the scrollback.
+///   - A hidden cursor.
+///   - Focus reports, which the shell receives as text on every focus
+///     change.
+///   - The Kitty keyboard protocol and modifyOtherKeys, which send keys
+///     like Ctrl+D as escape sequences (`CSI 100;5u`) that the shell
+///     shows as text.
+///
+/// Call this when the shell reports that a command ended. Returns true
+/// if any of these was on.
+pub fn resetCommandLeftovers(self: *Terminal) !bool {
+    var was_on = false;
+
+    // Leave the alternate screen the way the program would have, so
+    // after 1049 the cursor returns to where the program started.
+    if (self.screens.active_key == .alternate) {
+        was_on = true;
+        const mode: SwitchScreenMode = if (self.modes.get(.alt_screen_save_cursor_clear_enter))
+            .@"1049"
+        else if (self.modes.get(.alt_screen))
+            .@"1047"
+        else
+            .@"47";
+        try self.switchScreenMode(mode, false);
+    }
+    self.modes.set(.alt_screen_legacy, false);
+    self.modes.set(.alt_screen, false);
+    self.modes.set(.alt_screen_save_cursor_clear_enter, false);
+
+    const cursor_visible = self.modes.getDefault(.cursor_visible);
+    if (self.modes.get(.cursor_visible) != cursor_visible) was_on = true;
+    self.modes.set(.cursor_visible, cursor_visible);
+
+    if (self.modes.get(.focus_event)) was_on = true;
+    self.modes.set(.focus_event, false);
+
+    if (self.flags.modify_other_keys_2) was_on = true;
+    self.flags.modify_other_keys_2 = false;
+
+    // Each screen has its own Kitty keyboard flags.
+    for ([_]ScreenSet.Key{ .primary, .alternate }) |key| {
+        const screen = self.screens.get(key) orelse continue;
+        if (screen.kitty_keyboard.current().int() != 0) was_on = true;
+        screen.kitty_keyboard = .{};
+    }
+
+    return was_on;
+}
+
 /// DECSTR - Soft Terminal Reset. Resets the modes and state a program may
 /// have left behind, without clearing the screen or moving the cursor.
 /// Beyond what the VT510 manual lists, this also resets what xterm's soft
@@ -16688,6 +16740,42 @@ test "Terminal: resetMouseTracking turns off reports and format" {
 
     // Nothing left to turn off.
     try testing.expect(!t.resetMouseTracking());
+}
+
+test "Terminal: resetCommandLeftovers undoes what a dead program left on" {
+    var t = try init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
+    defer t.deinit(testing.allocator);
+
+    // The program starts on the second line.
+    try t.printString("$ vim");
+    t.carriageReturn();
+    try t.linefeed();
+
+    // It hides the cursor, turns on modifyOtherKeys, focus reports, and
+    // the Kitty protocol, enters the alternate screen with 1049, and
+    // pushes the Kitty protocol again there.
+    t.modes.set(.cursor_visible, false);
+    t.flags.modify_other_keys_2 = true;
+    t.modes.set(.focus_event, true);
+    t.screens.active.kitty_keyboard.push(.{ .disambiguate = true });
+    t.modes.set(.alt_screen_save_cursor_clear_enter, true);
+    try t.switchScreenMode(.@"1049", true);
+    t.screens.active.kitty_keyboard.push(.{ .disambiguate = true, .report_events = true });
+    t.setCursorPos(5, 5);
+
+    try testing.expect(try t.resetCommandLeftovers());
+    try testing.expectEqual(.primary, t.screens.active_key);
+    try testing.expect(!t.modes.get(.alt_screen_save_cursor_clear_enter));
+    try testing.expectEqual(1, t.screens.active.cursor.y);
+    try testing.expectEqual(0, t.screens.active.cursor.x);
+    try testing.expect(t.modes.get(.cursor_visible));
+    try testing.expect(!t.modes.get(.focus_event));
+    try testing.expect(!t.flags.modify_other_keys_2);
+    try testing.expectEqual(0, t.screens.get(.alternate).?.kitty_keyboard.current().int());
+    try testing.expectEqual(0, t.screens.get(.primary).?.kitty_keyboard.current().int());
+
+    // Nothing left to turn off.
+    try testing.expect(!try t.resetCommandLeftovers());
 }
 
 test "Terminal: fullReset tracked pins" {
