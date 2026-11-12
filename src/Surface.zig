@@ -1141,6 +1141,11 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
 
         .remote_session => |v| {
             const program = std.mem.sliceTo(&v.program, 0);
+            {
+                self.renderer_state.mutex.lockUncancelable(global.io());
+                defer self.renderer_state.mutex.unlock(global.io());
+                self.renderer_state.remote_session = program.len > 0;
+            }
             _ = try self.rt_app.performAction(
                 .{ .surface = self },
                 .remote_session,
@@ -4578,6 +4583,7 @@ fn linkAtPin(
                     .{
                         .pwd = self.io.terminal.getPwd(),
                         .home = self.config.home_dir,
+                        .remote = self.renderer_state.remote_session,
                     },
                 ) orelse continue;
 
@@ -4633,6 +4639,10 @@ fn processLinks(self: *Surface, pos: apprt.CursorPos) !bool {
             });
             defer self.alloc.free(str);
 
+            // Paths printed through ssh or mosh are on the remote host.
+            if (self.renderer_state.remote_session and
+                try self.openRemotePath(str)) return true;
+
             const resolved_path = try self.resolvePathForOpening(str);
             defer if (resolved_path) |p| self.alloc.free(p);
 
@@ -4650,6 +4660,36 @@ fn processLinks(self: *Surface, pos: apprt.CursorPos) !bool {
     }
 
     return true;
+}
+
+/// Asks the apprt to show `path`, a link in the output of the remote
+/// client (ssh, mosh) in the foreground, from the host the client is
+/// connected to. Returns false if the path or the host can't be known or
+/// the apprt can't fetch files, so the link is opened as a local one.
+///
+/// Requires the renderer state mutex is held.
+fn openRemotePath(self: *Surface, path: []const u8) !bool {
+    var arena: ArenaAllocator = .init(self.alloc);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const paths = try configpkg.url.remotePaths(alloc, path) orelse return false;
+    const ssh_args = try termio.remote.foregroundSshArgs(
+        alloc,
+        self.io.getProcessInfo(.foreground_pid),
+    ) orelse {
+        log.info("can't tell which host the remote client is connected to", .{});
+        return false;
+    };
+
+    return try self.rt_app.performAction(
+        .{ .surface = self },
+        .open_remote_path,
+        .{
+            .ssh_args = try apprt.action.OpenRemotePath.list(alloc, ssh_args),
+            .paths = try apprt.action.OpenRemotePath.list(alloc, paths),
+        },
+    );
 }
 
 fn openUrl(

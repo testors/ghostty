@@ -783,6 +783,10 @@ pub const Application = extern struct {
 
             .remote_session => Action.remoteSession(target, value),
 
+            // GTK can't fetch remote files yet, so the path is opened as
+            // a local one.
+            .open_remote_path => return false,
+
             .scrollbar => Action.scrollbar(target, value),
 
             .set_title => Action.setTitle(target, value),

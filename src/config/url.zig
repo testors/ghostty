@@ -130,6 +130,12 @@ pub const PathContext = struct {
 
     /// The user's home directory, for paths starting with "~/".
     home: ?[]const u8 = null,
+
+    /// True if the output comes from another machine, through a remote
+    /// client such as ssh or mosh. Its paths can't be checked here, so
+    /// matches are kept whole, except that bare paths without a dot
+    /// aren't links. See `remotePaths`.
+    remote: bool = false,
 };
 
 /// Returns how many bytes of `match`, a match of `regex`, are the link,
@@ -144,7 +150,8 @@ pub const PathContext = struct {
 /// punctuation, non-ASCII text or ":<number>" parts that end each word.
 ///
 /// If no prefix exists, or the path can't be checked (a relative path
-/// with no known pwd, or one using a $VARIABLE), the full match is kept.
+/// with no known pwd, one using a $VARIABLE, or one on another machine),
+/// the full match is kept.
 /// The exception is bare paths without a dot such as "src/config", which
 /// are only links if they exist.
 pub fn linkLen(io: std.Io, match: []const u8, ctx: PathContext) ?usize {
@@ -165,6 +172,7 @@ pub fn linkLen(io: std.Io, match: []const u8, ctx: PathContext) ?usize {
         ) == null,
     };
     const fallback: ?usize = if (must_exist) null else match.len;
+    if (ctx.remote) return fallback;
 
     const root: PathRoot = if (match[0] == '/')
         .{ .dir = "", .skip = 0 }
@@ -176,45 +184,103 @@ pub fn linkLen(io: std.Io, match: []const u8, ctx: PathContext) ?usize {
 
     if (root.exists(io, match)) return match.len;
 
-    // Walk back one codepoint at a time. `trimming` is true while
-    // everything between here and the end of the word could be text
-    // that follows the path rather than part of it.
-    var trimming = true;
-    var i = match.len;
-    while (i > slash + 1) {
-        var j = i - 1;
-        while (j > 0 and match[j] & 0xC0 == 0x80) j -= 1;
-        i = j;
-
-        const c = match[j];
-        if (c == ' ') {
-            trimming = true;
-        } else if (trimming and std.ascii.isDigit(c)) {
-            // A line or column number after a path, such as ":42" in
-            // "src/main.zig:42:10". Skip to its colon, which is tried next.
-            var k = j;
-            while (k > 0 and std.ascii.isDigit(match[k - 1])) k -= 1;
-            if (k > 0 and match[k - 1] == ':') {
-                i = k;
-                continue;
-            }
-            trimming = false;
-            continue;
-        } else if (!trimming or !trailingText(c)) {
-            trimming = false;
-            continue;
-        }
-
-        // Paths don't end with a space, and we never shorten one to
-        // just its root, such as "~/" or "../".
-        const candidate = match[0..j];
-        if (candidate[j - 1] == ' ') continue;
-        if (std.mem.indexOfNone(u8, candidate[slash + 1 ..], "./") == null) continue;
-        if (root.exists(io, candidate)) return j;
+    var cuts: Cuts = .init(match, slash);
+    while (cuts.next()) |len| {
+        if (root.exists(io, match[0..len])) return len;
     }
 
     return fallback;
 }
+
+/// The paths that `match`, a match of `regex` in the output of a remote
+/// client such as ssh, may name on the remote host, best first: the
+/// whole match, then the prefixes `linkLen` would try. The remote host
+/// checks which exists. Returns null if the match isn't a path that can
+/// be looked for there, such as a scheme URL or a path using a
+/// $VARIABLE. The slices point into `match`.
+pub fn remotePaths(
+    alloc: std.mem.Allocator,
+    match: []const u8,
+) std.mem.Allocator.Error!?[]const []const u8 {
+    const slash = std.mem.indexOfScalar(u8, match, '/') orelse return null;
+    if (std.mem.indexOfScalar(u8, match[0..slash], ':') != null) return null;
+    if (std.mem.indexOfScalar(u8, match, '$') != null) return null;
+
+    var result: std.ArrayList([]const u8) = .empty;
+    errdefer result.deinit(alloc);
+    try result.append(alloc, match);
+
+    var cuts: Cuts = .init(match, slash);
+    while (cuts.next()) |len| {
+        if (result.items.len == max_remote_paths) break;
+        try result.append(alloc, match[0..len]);
+    }
+
+    return try result.toOwnedSlice(alloc);
+}
+
+/// The most paths `remotePaths` returns.
+const max_remote_paths = 16;
+
+/// The prefixes of a path match that may be the path, longest first, not
+/// counting the whole match. See `linkLen`.
+const Cuts = struct {
+    match: []const u8,
+
+    /// The first slash. We never cut before it.
+    slash: usize,
+
+    /// Where we cut last.
+    i: usize,
+
+    /// True while everything between `i` and the end of the word could
+    /// be text that follows the path rather than part of it.
+    trimming: bool = true,
+
+    fn init(match: []const u8, slash: usize) Cuts {
+        return .{ .match = match, .slash = slash, .i = match.len };
+    }
+
+    /// Returns the length of the next prefix, walking back one codepoint
+    /// at a time.
+    fn next(self: *Cuts) ?usize {
+        const match = self.match;
+        while (self.i > self.slash + 1) {
+            var j = self.i - 1;
+            while (j > 0 and match[j] & 0xC0 == 0x80) j -= 1;
+            self.i = j;
+
+            const c = match[j];
+            if (c == ' ') {
+                self.trimming = true;
+            } else if (self.trimming and std.ascii.isDigit(c)) {
+                // A line or column number after a path, such as ":42" in
+                // "src/main.zig:42:10". Skip to its colon, which is tried
+                // next.
+                var k = j;
+                while (k > 0 and std.ascii.isDigit(match[k - 1])) k -= 1;
+                if (k > 0 and match[k - 1] == ':') {
+                    self.i = k;
+                    continue;
+                }
+                self.trimming = false;
+                continue;
+            } else if (!self.trimming or !trailingText(c)) {
+                self.trimming = false;
+                continue;
+            }
+
+            // Paths don't end with a space, and we never shorten one to
+            // just its root, such as "~/" or "../".
+            const candidate = match[0..j];
+            if (candidate[j - 1] == ' ') continue;
+            if (std.mem.indexOfNone(u8, candidate[self.slash + 1 ..], "./") == null) continue;
+            return j;
+        }
+
+        return null;
+    }
+};
 
 /// Where a path from `linkLen` is found on disk.
 const PathRoot = struct {
@@ -689,6 +755,7 @@ test "linkLen" {
     const at_root: PathContext = .{ .pwd = root, .home = root };
     const at_repos: PathContext = .{ .pwd = repos, .home = root };
     const unknown: PathContext = .{};
+    const remote: PathContext = .{ .pwd = root, .home = root, .remote = true };
 
     const Case = struct {
         ctx: PathContext,
@@ -736,12 +803,18 @@ test "linkLen" {
         .{ .ctx = unknown, .input = "~/Repos/ghostty에서", .expect = "~/Repos/ghostty에서" },
         .{ .ctx = unknown, .input = "../blah/blah for details", .expect = "../blah/blah for details" },
 
+        // paths from another machine are never checked here
+        .{ .ctx = remote, .input = "~/Repos/ghostty에서", .expect = "~/Repos/ghostty에서" },
+        .{ .ctx = remote, .input = "src/foo.zig:42", .expect = "src/foo.zig:42" },
+        .{ .ctx = remote, .input = "https://example.com/a", .expect = "https://example.com/a" },
+
         // ...except bare paths without a dot, which must exist
         .{ .ctx = at_root, .input = "input/output", .expect = null },
         .{ .ctx = at_root, .input = "foo/bar", .expect = null },
         .{ .ctx = at_root, .input = "input/output.", .expect = null },
         .{ .ctx = at_repos, .input = "blah/blah", .expect = null },
         .{ .ctx = unknown, .input = "blah/blah", .expect = null },
+        .{ .ctx = remote, .input = "blah/blah", .expect = null },
     };
 
     for (cases) |case| {
@@ -760,6 +833,51 @@ test "linkLen" {
                 std.debug.print("input: {s}\n", .{case.input});
                 return err;
             };
+        }
+    }
+}
+
+test "remotePaths" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+
+    const cases = [_]struct {
+        input: []const u8,
+        expect: ?[]const []const u8,
+    }{
+        .{
+            .input = "outputs/run/README.md",
+            .expect = &.{"outputs/run/README.md"},
+        },
+        .{
+            .input = "docs/protocol.md에서",
+            .expect = &.{ "docs/protocol.md에서", "docs/protocol.md에", "docs/protocol.md" },
+        },
+        .{
+            .input = "src/foo.zig:42:10",
+            .expect = &.{ "src/foo.zig:42:10", "src/foo.zig:42", "src/foo.zig" },
+        },
+        .{
+            .input = "~/notes/a b.txt for",
+            .expect = &.{ "~/notes/a b.txt for", "~/notes/a b.txt", "~/notes/a" },
+        },
+        .{ .input = "https://example.com/a", .expect = null },
+        .{ .input = "$HOME/a.txt", .expect = null },
+    };
+
+    for (cases) |case| {
+        const result = try remotePaths(alloc, case.input);
+        defer if (result) |v| alloc.free(v);
+        if (case.expect) |expect| {
+            const actual = result orelse return error.TestUnexpectedNull;
+            testing.expectEqual(expect.len, actual.len) catch |err| {
+                std.debug.print("input: {s}\n", .{case.input});
+                for (actual) |a| std.debug.print("  got: {s}\n", .{a});
+                return err;
+            };
+            for (expect, actual) |e, a| try testing.expectEqualStrings(e, a);
+        } else {
+            try testing.expect(result == null);
         }
     }
 }

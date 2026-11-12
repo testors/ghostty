@@ -32,6 +32,10 @@ extension Ghostty {
         // The hovered URL string
         @Published var hoverUrl: String?
 
+        // A file being downloaded from the remote host after its path was
+        // clicked. See RemoteFileViewer.
+        @Published var remoteFileDownload: RemoteFileDownload?
+
         // The progress report (if any)
         @Published var progressReport: Action.ProgressReport?
 

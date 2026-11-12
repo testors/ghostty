@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const build_config = @import("../build_config.zig");
 const assert = @import("../quirks.zig").inlineAssert;
 const apprt = @import("../apprt.zig");
@@ -376,6 +377,12 @@ pub const Action = union(Key) {
     /// remote host.
     remote_session: RemoteSession,
 
+    /// Show a file from the host that a remote client (ssh, mosh) in the
+    /// terminal is connected to, such as a path in its output that the
+    /// user clicked. Apprts that can't fetch files return false, and the
+    /// path is then opened as a local one.
+    open_remote_path: OpenRemotePath,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -451,6 +458,7 @@ pub const Action = union(Key) {
         reset_title,
         open_settings,
         remote_session,
+        open_remote_path,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
@@ -845,6 +853,42 @@ pub const RemoteSession = struct {
             value.active,
             value.program,
         });
+    }
+};
+
+pub const OpenRemotePath = struct {
+    /// Arguments for ssh(1) that reach the remote host: options, then the
+    /// destination. Put options that must win before them (ssh uses the
+    /// first value it gets) and the remote command after them.
+    ssh_args: List,
+
+    /// The paths to look for on the remote host, best first. The first
+    /// one that exists is the file to show. Relative paths are relative
+    /// to the directory of the program that printed them, which only the
+    /// remote host can know, and "~/" is the remote home directory.
+    paths: List,
+
+    /// A list of strings, ending with null like argv.
+    pub const List = [:null]const ?[*:0]const u8;
+
+    /// Copies `strings` into a `List` allocated with `alloc`.
+    pub fn list(alloc: Allocator, strings: []const []const u8) Allocator.Error!List {
+        const result = try alloc.allocSentinel(?[*:0]const u8, strings.len, null);
+        for (strings, result) |string, *item| item.* = try alloc.dupeSentinel(u8, string, 0);
+        return result;
+    }
+
+    // Sync with: ghostty_action_open_remote_path_s
+    pub const C = extern struct {
+        ssh_args: [*:null]const ?[*:0]const u8,
+        paths: [*:null]const ?[*:0]const u8,
+    };
+
+    pub fn cval(self: OpenRemotePath) C {
+        return .{
+            .ssh_args = self.ssh_args.ptr,
+            .paths = self.paths.ptr,
+        };
     }
 };
 

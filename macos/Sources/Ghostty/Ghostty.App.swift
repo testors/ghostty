@@ -676,6 +676,9 @@ extension Ghostty {
             case GHOSTTY_ACTION_REMOTE_SESSION:
                 remoteSessionChanged(app, target: target, v: action.action.remote_session)
 
+            case GHOSTTY_ACTION_OPEN_REMOTE_PATH:
+                return openRemotePath(app, target: target, v: action.action.open_remote_path)
+
             case GHOSTTY_ACTION_OPEN_CONFIG:
                 openConfig(app)
 
@@ -2050,6 +2053,38 @@ extension Ghostty {
             surfaceView.remoteSession = RemoteSession(
                 program: v.program.map { String(cString: $0) } ?? ""
             )
+        }
+
+        private static func openRemotePath(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s,
+            v: ghostty_action_open_remote_path_s) -> Bool {
+            guard target.tag == GHOSTTY_TARGET_SURFACE,
+                  let surface = target.target.surface,
+                  let surfaceView = self.surfaceView(from: surface) else { return false }
+
+            let fetch = RemoteFileFetch(
+                sshArgs: strings(v.ssh_args),
+                paths: strings(v.paths)
+            )
+            guard !fetch.sshArgs.isEmpty, !fetch.paths.isEmpty else { return false }
+
+            // The core calls this with the renderer mutex held; the viewer
+            // downloads in the background and shows the file later.
+            RemoteFileViewer.shared.open(fetch, from: surfaceView)
+            return true
+        }
+
+        /// The strings of a NULL-terminated C string array, like argv.
+        private static func strings(_ list: UnsafePointer<UnsafePointer<CChar>?>?) -> [String] {
+            guard let list else { return [] }
+            var result: [String] = []
+            var i = 0
+            while let item = list[i] {
+                result.append(String(cString: item))
+                i += 1
+            }
+            return result
         }
 
         private static func setMouseShape(

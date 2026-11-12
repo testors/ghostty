@@ -1500,6 +1500,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 links: terminal.RenderState.CellSet,
                 mouse: renderer.State.Mouse,
                 pwd: ?[]const u8,
+                remote_session: bool,
                 preedit: ?renderer.State.Preedit,
                 scrollbar: terminal.Scrollbar,
                 overlay_features: []const Overlay.Feature,
@@ -1663,6 +1664,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     .links = links,
                     .mouse = state.mouse,
                     .pwd = pwd,
+                    .remote_session = state.remote_session,
                     .preedit = preedit,
                     .scrollbar = scrollbar,
                     .overlay_features = overlay_features,
@@ -1682,7 +1684,11 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 &self.terminal_state,
                 state.mouse.point,
                 state.mouse.mods,
-                .{ .pwd = critical.pwd, .home = self.config.home_dir },
+                .{
+                    .pwd = critical.pwd,
+                    .home = self.config.home_dir,
+                    .remote = critical.remote_session,
+                },
             ) catch |err| {
                 log.warn("error searching for regex links err={}", .{err});
             };

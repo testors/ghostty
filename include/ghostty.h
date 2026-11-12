@@ -733,6 +733,15 @@ typedef struct {
   const char* program;
 } ghostty_action_remote_session_s;
 
+// apprt.action.OpenRemotePath.C
+typedef struct {
+  // Arguments for ssh(1) that reach the remote host: options, then the
+  // destination. NULL-terminated like argv.
+  const char* const* ssh_args;
+  // The paths to look for on the remote host, best first. NULL-terminated.
+  const char* const* paths;
+} ghostty_action_open_remote_path_s;
+
 // apprt.action.OpenConfig
 typedef enum {
   // Open the config in the OS default editor.
@@ -1025,6 +1034,7 @@ typedef enum {
   GHOSTTY_ACTION_RESET_TITLE,
   GHOSTTY_ACTION_OPEN_SETTINGS,
   GHOSTTY_ACTION_REMOTE_SESSION,
+  GHOSTTY_ACTION_OPEN_REMOTE_PATH,
 } ghostty_action_tag_e;
 
 typedef union {
@@ -1049,6 +1059,7 @@ typedef union {
   ghostty_action_prompt_title_e reset_title;
   ghostty_action_pwd_s pwd;
   ghostty_action_remote_session_s remote_session;
+  ghostty_action_open_remote_path_s open_remote_path;
   ghostty_action_mouse_shape_e mouse_shape;
   ghostty_action_mouse_visibility_e mouse_visibility;
   ghostty_action_mouse_over_link_s mouse_over_link;

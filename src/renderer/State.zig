@@ -33,6 +33,11 @@ preedit: ?Preedit = null,
 /// need about the mouse.
 mouse: Mouse = .{},
 
+/// True while a remote client (ssh, mosh, ...) is in the foreground, so
+/// paths in the output are on another machine and can't be checked on
+/// this one. See termio/remote.zig.
+remote_session: bool = false,
+
 /// The number of threads currently waiting to acquire `mutex` via
 /// `lockDemand`. This is not protected by the mutex; it is read by
 /// hot lock/unlock loops (the IO parse thread) in `yieldToDemand` to

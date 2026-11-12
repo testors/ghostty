@@ -103,6 +103,10 @@ extension Ghostty {
                         URLHoverBanner(url: url)
                     }
 
+                    if let download = surfaceView.remoteFileDownload {
+                        RemoteFileBanner(download: download)
+                    }
+
                     // Show a bar to indicate a child process has exited.
                     if let msg = surfaceView.childExitedMessage {
                         ChildExitedMessageBar(msg: msg)
