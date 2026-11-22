@@ -155,15 +155,100 @@ pub const PathContext = struct {
 /// The exception is bare paths without a dot such as "src/config", which
 /// are only links if they exist.
 pub fn linkLen(io: std.Io, match: []const u8, ctx: PathContext) ?usize {
-    // Scheme URLs ("https://", "mailto:") have a colon before any slash.
-    // Paths never do.
-    const slash = std.mem.indexOfScalar(u8, match, '/') orelse return match.len;
-    if (std.mem.indexOfScalar(u8, match[0..slash], ':') != null) return match.len;
-    if (std.mem.indexOfScalar(u8, match, '$') != null) return match.len;
+    if (pathSlash(match) == null) return match.len;
+    return switch (pathOnDisk(io, match, ctx, &.{})) {
+        .len => |len| len,
+        .unchecked, .missing => if (mustExist(match)) null else match.len,
+    };
+}
 
-    // A dot makes a bare path look like a file ("src/main.zig"), but not
-    // the period ending a sentence.
-    const must_exist = switch (match[0]) {
+/// What `pathOnDisk` found.
+pub const OnDisk = union(enum) {
+    /// The match isn't a path that can be looked for here: a scheme URL,
+    /// a path using a $VARIABLE, a relative path with no known pwd, or a
+    /// path on another machine.
+    unchecked,
+
+    /// No prefix that was tried exists.
+    missing,
+
+    /// The length of the longest prefix that exists.
+    len: usize,
+};
+
+/// The most `ends` that `pathOnDisk` tries.
+pub const max_ends = 8;
+
+/// Returns the longest prefix of `match`, a match of `regex`, that exists
+/// on disk. This tries the whole match and the prefixes `linkLen` would
+/// cut it to, and the same for the prefixes of `match` that are `ends`
+/// bytes long, such as where a link may end instead of going on in the
+/// next row of the screen.
+pub fn pathOnDisk(
+    io: std.Io,
+    match: []const u8,
+    ctx: PathContext,
+    ends: []const usize,
+) OnDisk {
+    const slash = pathSlash(match) orelse return .unchecked;
+    if (ctx.remote) return .unchecked;
+
+    const root: PathRoot = if (match[0] == '/')
+        .{ .dir = "", .skip = 0 }
+    else if (std.mem.startsWith(u8, match, "~/"))
+        .{ .dir = ctx.home orelse return .unchecked, .skip = 1 }
+    else
+        .{ .dir = ctx.pwd orelse return .unchecked, .skip = 0 };
+    if (root.dir.len > 0 and !std.fs.path.isAbsolute(root.dir)) return .unchecked;
+
+    // Each prefix to try, with the cuts after it. We try the lengths of
+    // all of them longest first, so the first that exists is the longest.
+    const Prefix = struct { next: ?usize, cuts: Cuts };
+    var prefixes: [max_ends + 1]Prefix = undefined;
+    var len: usize = 0;
+    prefixes[len] = .{ .next = match.len, .cuts = .init(match, slash) };
+    len += 1;
+    for (ends) |end| {
+        if (len == prefixes.len) break;
+        if (end <= slash + 1 or end >= match.len) continue;
+        prefixes[len] = .{ .next = end, .cuts = .init(match[0..end], slash) };
+        len += 1;
+    }
+
+    var last: ?usize = null;
+    while (true) {
+        var longest: ?*Prefix = null;
+        for (prefixes[0..len]) |*prefix| {
+            const next = prefix.next orelse continue;
+            if (longest == null or next > longest.?.next.?) longest = prefix;
+        }
+
+        const prefix = longest orelse return .missing;
+        const candidate = prefix.next.?;
+        prefix.next = prefix.cuts.next();
+        if (last == candidate) continue;
+        last = candidate;
+        if (root.exists(io, match[0..candidate])) return .{ .len = candidate };
+    }
+}
+
+/// Returns the index of the first slash of `match`, a match of `regex`,
+/// or null if it isn't a path we can look for: scheme URLs ("https://",
+/// "mailto:"), which have a colon before any slash, and paths using a
+/// $VARIABLE.
+fn pathSlash(match: []const u8) ?usize {
+    const slash = std.mem.indexOfScalar(u8, match, '/') orelse return null;
+    if (std.mem.indexOfScalar(u8, match[0..slash], ':') != null) return null;
+    if (std.mem.indexOfScalar(u8, match, '$') != null) return null;
+    return slash;
+}
+
+/// Returns true if `match`, a path match of `regex`, is only a link if it
+/// exists: a bare path without a dot, which looks just like words joined
+/// by a slash ("and/or"). A dot makes a bare path look like a file
+/// ("src/main.zig"), but not the period ending a sentence.
+fn mustExist(match: []const u8) bool {
+    return switch (match[0]) {
         '/', '.', '~' => false,
         else => std.mem.indexOfScalar(
             u8,
@@ -171,25 +256,6 @@ pub fn linkLen(io: std.Io, match: []const u8, ctx: PathContext) ?usize {
             '.',
         ) == null,
     };
-    const fallback: ?usize = if (must_exist) null else match.len;
-    if (ctx.remote) return fallback;
-
-    const root: PathRoot = if (match[0] == '/')
-        .{ .dir = "", .skip = 0 }
-    else if (std.mem.startsWith(u8, match, "~/"))
-        .{ .dir = ctx.home orelse return fallback, .skip = 1 }
-    else
-        .{ .dir = ctx.pwd orelse return fallback, .skip = 0 };
-    if (root.dir.len > 0 and !std.fs.path.isAbsolute(root.dir)) return fallback;
-
-    if (root.exists(io, match)) return match.len;
-
-    var cuts: Cuts = .init(match, slash);
-    while (cuts.next()) |len| {
-        if (root.exists(io, match[0..len])) return len;
-    }
-
-    return fallback;
 }
 
 /// The paths that `match`, a match of `regex` in the output of a remote
@@ -202,9 +268,7 @@ pub fn remotePaths(
     alloc: std.mem.Allocator,
     match: []const u8,
 ) std.mem.Allocator.Error!?[]const []const u8 {
-    const slash = std.mem.indexOfScalar(u8, match, '/') orelse return null;
-    if (std.mem.indexOfScalar(u8, match[0..slash], ':') != null) return null;
-    if (std.mem.indexOfScalar(u8, match, '$') != null) return null;
+    const slash = pathSlash(match) orelse return null;
 
     var result: std.ArrayList([]const u8) = .empty;
     errdefer result.deinit(alloc);
@@ -835,6 +899,35 @@ test "linkLen" {
             };
         }
     }
+}
+
+test "pathOnDisk" {
+    const testing = std.testing;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, "src/renderer");
+    try tmp.dir.writeFile(io, .{ .sub_path = "src/renderer/link.zig", .data = "" });
+
+    var root_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const root = root_buf[0..try tmp.dir.realPath(io, &root_buf)];
+    const ctx: PathContext = .{ .pwd = root };
+
+    // The whole match, then its cuts.
+    try testing.expectEqual(OnDisk{ .len = 21 }, pathOnDisk(io, "src/renderer/link.zig", ctx, &.{}));
+    try testing.expectEqual(OnDisk{ .len = 21 }, pathOnDisk(io, "src/renderer/link.zig에서", ctx, &.{}));
+    try testing.expectEqual(OnDisk.missing, pathOnDisk(io, "src/renderer/linkdone", ctx, &.{}));
+
+    // Prefixes at `ends`, with their own cuts, longest first.
+    try testing.expectEqual(OnDisk{ .len = 13 }, pathOnDisk(io, "src/renderer/done", ctx, &.{13}));
+    try testing.expectEqual(OnDisk{ .len = 21 }, pathOnDisk(io, "src/renderer/link.zig입니다next", ctx, &.{ 13, 30 }));
+    try testing.expectEqual(OnDisk{ .len = 21 }, pathOnDisk(io, "src/renderer/link.zig/more", ctx, &.{ 13, 21 }));
+
+    // Matches that can't be checked.
+    try testing.expectEqual(OnDisk.unchecked, pathOnDisk(io, "https://example.com/a", ctx, &.{5}));
+    try testing.expectEqual(OnDisk.unchecked, pathOnDisk(io, "src/renderer/link.zig", .{}, &.{}));
+    try testing.expectEqual(OnDisk.unchecked, pathOnDisk(io, "src/renderer/link.zig", .{ .pwd = root, .remote = true }, &.{}));
 }
 
 test "remotePaths" {

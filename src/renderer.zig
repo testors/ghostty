@@ -32,6 +32,7 @@ pub const Padding = size.Padding;
 pub const cursorStyle = cursor.style;
 pub const cursorBlinkable = cursor.blinkable;
 pub const lib = @import("lib/main.zig");
+pub const link_text = @import("renderer/link_text.zig");
 
 /// The implementation to use for the renderer. This is comptime chosen
 /// so that every build has exactly one renderer implementation.
@@ -67,4 +68,5 @@ test {
     _ = size;
     _ = Thread;
     _ = State;
+    _ = link_text;
 }

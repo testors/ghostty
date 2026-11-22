@@ -1717,10 +1717,11 @@ fn mouseRefreshLinks(
         const link = (try self.linkAtPos(pos)) orelse break :link .{ null, false };
         switch (link.action) {
             .open => {
-                const str = try self.io.terminal.screens.active.selectionString(alloc, .{
-                    .sel = link.selection,
-                    .trim = false,
-                });
+                const str = try link.string(
+                    alloc,
+                    self.io.terminal.screens.active,
+                    false,
+                );
                 break :link .{
                     .{ .url = str },
                     self.config.link_previews == .true,
@@ -4494,6 +4495,46 @@ fn promptClickRelativeRow(
 const Link = struct {
     action: input.Link.Action,
     selection: terminal.Selection,
+
+    /// The link's part in each row, for a link that a TUI broke over
+    /// rows (see `rendererpkg.link_text`). Empty for other links, whose
+    /// text is all of `selection`.
+    parts: Parts = .{},
+
+    const Parts = struct {
+        buf: [max]terminal.Selection = undefined,
+        len: usize = 0,
+
+        /// A click looks at up to `max_joins` joins above and below it.
+        const max = 2 * rendererpkg.link_text.max_joins + 1;
+    };
+
+    /// Returns the link's text. The caller owns it.
+    ///
+    /// Requires the renderer state mutex is held.
+    fn string(
+        self: *const Link,
+        alloc: Allocator,
+        screen: *terminal.Screen,
+        trim: bool,
+    ) ![:0]const u8 {
+        if (self.parts.len == 0) return try screen.selectionString(alloc, .{
+            .sel = self.selection,
+            .trim = trim,
+        });
+
+        var result: std.Io.Writer.Allocating = .init(alloc);
+        defer result.deinit();
+        for (self.parts.buf[0..self.parts.len]) |part| {
+            const str = try screen.selectionString(alloc, .{
+                .sel = part,
+                .trim = trim,
+            });
+            defer alloc.free(str);
+            result.writer.writeAll(str) catch return error.OutOfMemory;
+        }
+        return result.toOwnedSliceSentinel(0) catch return error.OutOfMemory;
+    }
 };
 
 /// Returns the link at the given cursor position, if any.
@@ -4545,62 +4586,57 @@ fn linkAtPin(
 ) !?Link {
     if (self.config.links.len == 0) return null;
 
-    const screen: *terminal.Screen = self.renderer_state.terminal.screens.active;
-    const line = screen.selectLine(.{
-        .pin = mouse_pin,
-        .whitespace = null,
-        // Respect semantic prompt boundaries so link/path matching doesn't
-        // merge shell prompt content with the text beside it.
-        .semantic_prompt_boundary = true,
-    }) orelse return null;
+    var rows: rendererpkg.link_text.ScreenRows = try .init(self.alloc, mouse_pin);
+    defer rows.deinit(self.alloc);
+    var finder: rendererpkg.link_text.Finder = try .init(self.alloc, &rows);
+    defer finder.deinit(self.alloc);
+    var found: std.ArrayList(rendererpkg.link_text.Finder.Link) = .empty;
+    defer found.deinit(self.alloc);
 
-    const strmap = try screen.selectionStringMap(self.alloc, .{
-        .sel = line,
-        .trim = false,
-    });
-    defer strmap.deinit(self.alloc);
-
-    for (self.config.links) |link| {
+    for (self.config.links) |*link| {
         // Skip highlight/mods check when mouse_mods is null (double-click mode)
         if (mouse_mods) |mods| switch (link.highlight) {
             .always, .hover => {},
             .always_mods, .hover_mods => |v| if (!v.equal(mods)) continue,
         };
 
-        var it = strmap.searchIterator(link.regex);
-        while (true) {
-            var match = (try it.next()) orelse break;
-            defer match.deinit();
-            var sel = match.selection();
-            if (!sel.contains(screen, mouse_pin)) continue;
+        found.clearRetainingCapacity();
+        try finder.find(
+            self.alloc,
+            global.io(),
+            &link.regex,
+            if (link.validate_paths) .{
+                .pwd = self.io.terminal.getPwd(),
+                .home = self.config.home_dir,
+                .remote = self.renderer_state.remote_session,
+            } else null,
+            rows.coordinate(mouse_pin.x),
+            &found,
+        );
+        if (found.items.len == 0) continue;
 
-            if (link.validate_paths) {
-                const start = match.offset + @as(usize, @intCast(match.region.starts()[0]));
-                const end = match.offset + @as(usize, @intCast(match.region.ends()[0]));
-                const len = configpkg.url.linkLen(
-                    global.io(),
-                    strmap.string[start..end],
-                    .{
-                        .pwd = self.io.terminal.getPwd(),
-                        .home = self.config.home_dir,
-                        .remote = self.renderer_state.remote_session,
-                    },
-                ) orelse continue;
+        const match = found.items[0];
+        const cells = match.cells();
+        var result: Link = .{
+            .action = link.action,
+            .selection = .init(
+                rows.pinAt(cells[0]),
+                rows.pinAt(cells[cells.len - 1]),
+                false,
+            ),
+        };
 
-                // If we kept less than the match, the rest may hold
-                // another link, so search it next.
-                if (start + len < end) {
-                    it.offset = start + len;
-                    sel = .init(sel.start(), strmap.map.get(start + len - 1).?, false);
-                    if (!sel.contains(screen, mouse_pin)) continue;
-                }
-            }
-
-            return .{
-                .action = link.action,
-                .selection = sel,
-            };
-        }
+        var buf: [Link.Parts.max][]const terminal.point.Coordinate = undefined;
+        const parts = match.parts(&buf);
+        if (parts.len > 1) for (parts) |part| {
+            result.parts.buf[result.parts.len] = .init(
+                rows.pinAt(part[0]),
+                rows.pinAt(part[part.len - 1]),
+                false,
+            );
+            result.parts.len += 1;
+        };
+        return result;
     }
 
     return null;
@@ -4633,10 +4669,11 @@ fn processLinks(self: *Surface, pos: apprt.CursorPos) !bool {
     const link = try self.linkAtPos(pos) orelse return false;
     switch (link.action) {
         .open => {
-            const str = try self.io.terminal.screens.active.selectionString(self.alloc, .{
-                .sel = link.selection,
-                .trim = false,
-            });
+            const str = try link.string(
+                self.alloc,
+                self.io.terminal.screens.active,
+                false,
+            );
             defer self.alloc.free(str);
 
             // Paths printed through ssh or mosh are on the remote host.
@@ -5310,10 +5347,11 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
                 const url_text = switch (link_info.action) {
                     .open => url_text: {
                         // For regex links, get the text from selection
-                        break :url_text (self.io.terminal.screens.active.selectionString(self.alloc, .{
-                            .sel = link_info.selection,
-                            .trim = self.config.clipboard_trim_trailing_spaces,
-                        })) catch |err| {
+                        break :url_text link_info.string(
+                            self.alloc,
+                            self.io.terminal.screens.active,
+                            self.config.clipboard_trim_trailing_spaces,
+                        ) catch |err| {
                             log.err("error reading url string err={}", .{err});
                             return false;
                         };

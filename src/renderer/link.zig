@@ -5,6 +5,7 @@ const oni = @import("oniguruma");
 const global = @import("../global.zig");
 const inputpkg = @import("../input.zig");
 const url = @import("../config/url.zig");
+const link_text = @import("link_text.zig");
 const terminal = @import("../terminal/main.zig");
 const point = terminal.point;
 const Screen = terminal.Screen;
@@ -96,73 +97,74 @@ pub const Set = struct {
             if (link.active(mouse_viewport, mouse_mods)) break;
         } else return;
 
-        // Convert our render state to a string + byte map.
-        var builder: std.Io.Writer.Allocating = .init(alloc);
-        defer builder.deinit();
-        var map: terminal.RenderState.StringMap = .empty;
-        defer map.deinit(alloc);
-        try render_state.string(&builder.writer, .{
-            .alloc = alloc,
-            .map = &map,
-        });
+        const rows: ViewportRows = .init(render_state);
+        var finder: link_text.Finder = try .init(alloc, &rows);
+        defer finder.deinit(alloc);
+        var found: std.ArrayList(link_text.Finder.Link) = .empty;
+        defer found.deinit(alloc);
 
-        const str = builder.writer.buffered();
-
-        // Go through each link and see if we have any matches.
         for (self.links) |*link| {
             if (!link.active(mouse_viewport, mouse_mods)) continue;
 
-            var offset: usize = 0;
-            while (offset < str.len) {
-                var region = link.regex.search(
-                    str[offset..],
-                    .{},
-                ) catch |err| switch (err) {
-                    error.Mismatch => break,
-                    else => return err,
-                };
-                defer region.deinit();
+            // Hover links only highlight the match under the mouse.
+            const target: ?point.Coordinate = switch (link.highlight) {
+                .always, .always_mods => null,
+                .hover, .hover_mods => mouse_viewport orelse continue,
+            };
 
-                // We have a match!
-                const offset_start: usize = @intCast(region.starts()[0]);
-                const offset_end: usize = @intCast(region.ends()[0]);
-                const start = offset + offset_start;
-                var end = offset + offset_end;
+            found.clearRetainingCapacity();
+            try finder.find(
+                alloc,
+                global.io(),
+                &link.regex,
+                if (link.validate_paths) paths else null,
+                target,
+                &found,
+            );
 
-                // Increment our offset by the number of bytes in the match.
-                // We defer this so that we can return the match before
-                // modifying the offset.
-                defer offset = end;
-
-                // Hover links only highlight the match under the mouse.
-                const hover = switch (link.highlight) {
-                    .always, .always_mods => false,
-                    .hover, .hover_mods => true,
-                };
-                if (hover and !containsPoint(map.items[start..end], mouse_viewport)) continue;
-
-                if (link.validate_paths) {
-                    // If we keep less than the match, the rest may hold
-                    // another link, so we search it next.
-                    const len = url.linkLen(global.io(), str[start..end], paths) orelse continue;
-                    end = start + len;
-                    if (hover and !containsPoint(map.items[start..end], mouse_viewport)) continue;
+            // Record the matches, with the spacers of wide characters.
+            for (found.items) |match| for (match.cells()) |pt| {
+                try result.put(alloc, pt, {});
+                const cells = rows.cells(pt.y);
+                if (cells[pt.x].wide == .wide and pt.x + 1 < cells.len) {
+                    try result.put(alloc, .{ .x = pt.x + 1, .y = pt.y }, {});
                 }
-
-                // Record the match
-                for (map.items[start..end]) |pt| {
-                    try result.put(alloc, pt, {});
-                }
-            }
+            };
         }
     }
 };
 
-fn containsPoint(points: []const point.Coordinate, target: ?point.Coordinate) bool {
-    const t = target orelse return false;
-    for (points) |pt| if (pt.eql(t)) return true;
-    return false;
-}
+/// The viewport rows of a render state, as a source for
+/// `link_text.Finder`.
+const ViewportRows = struct {
+    rows: []const terminal.page.Row,
+    row_cells: []const std.MultiArrayList(terminal.RenderState.Cell),
+
+    fn init(state: *const terminal.RenderState) ViewportRows {
+        const row_slice = state.row_data.slice();
+        const start = state.viewportStart();
+        return .{
+            .rows = row_slice.items(.raw)[start..][0..state.rows],
+            .row_cells = row_slice.items(.cells)[start..][0..state.rows],
+        };
+    }
+
+    pub fn len(self: *const ViewportRows) usize {
+        return self.rows.len;
+    }
+
+    pub fn cells(self: *const ViewportRows, y: usize) []const terminal.Cell {
+        return self.row_cells[y].slice().items(.raw);
+    }
+
+    pub fn wrap(self: *const ViewportRows, y: usize) bool {
+        return self.rows[y].wrap;
+    }
+
+    pub fn graphemes(self: *const ViewportRows, y: usize, x: usize) []const u21 {
+        return self.row_cells[y].slice().items(.grapheme)[x];
+    }
+};
 
 test "renderCellMap" {
     const testing = std.testing;
@@ -479,5 +481,48 @@ test "renderCellMap trims paths to what exists" {
         defer result.deinit(alloc);
         try set.renderCellMap(alloc, &result, &state, .{ .x = 5, .y = 1 }, .{}, paths);
         try testing.expectEqual(@as(usize, 0), result.count());
+    }
+}
+
+test "renderCellMap joins links that a TUI broke over rows" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+
+    var t: terminal.Terminal = try .init(testing.io, alloc, .{
+        .cols = 20,
+        .rows = 3,
+    });
+    defer t.deinit(alloc);
+
+    var s = t.vtStream();
+    defer s.deinit();
+    // The URL is x=2 to x=17 of the first row and x=2 to x=6 of the second.
+    s.nextSlice("│ https://example. │\r\n│ com/x            │");
+
+    var state: terminal.RenderState = .empty;
+    defer state.deinit(alloc);
+    try state.update(alloc, &t);
+
+    var set = try Set.fromConfig(alloc, &.{.{
+        .regex = url.regex,
+        .action = .{ .open = {} },
+        .highlight = .{ .hover = {} },
+        .validate_paths = true,
+    }});
+    defer set.deinit(alloc);
+
+    // Hovering either part highlights both, but not the frame.
+    for ([_]point.Coordinate{ .{ .x = 4, .y = 0 }, .{ .x = 3, .y = 1 } }) |hover| {
+        var result: terminal.RenderState.CellSet = .empty;
+        defer result.deinit(alloc);
+        try set.renderCellMap(alloc, &result, &state, hover, .{}, .{});
+        try testing.expect(!result.contains(.{ .x = 0, .y = 0 }));
+        try testing.expect(result.contains(.{ .x = 2, .y = 0 }));
+        try testing.expect(result.contains(.{ .x = 17, .y = 0 }));
+        try testing.expect(!result.contains(.{ .x = 19, .y = 0 }));
+        try testing.expect(!result.contains(.{ .x = 0, .y = 1 }));
+        try testing.expect(result.contains(.{ .x = 2, .y = 1 }));
+        try testing.expect(result.contains(.{ .x = 6, .y = 1 }));
+        try testing.expect(!result.contains(.{ .x = 7, .y = 1 }));
     }
 }
