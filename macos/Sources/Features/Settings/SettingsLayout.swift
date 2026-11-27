@@ -81,6 +81,7 @@ enum SettingsLayout {
                     "window-height",
                     "maximize",
                     "fullscreen",
+                    "window-tile-gap",
                 ]),
                 Section(title: "Padding", keys: [
                     "window-padding-x",

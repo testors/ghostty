@@ -280,6 +280,14 @@ extension Ghostty {
             return v
         }
 
+        var windowTileGap: CGFloat {
+            guard let config = self.config else { return 1 }
+            var v: CUnsignedInt = 1
+            let key = "window-tile-gap"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return CGFloat(v)
+        }
+
         var dragHandle: DragHandle {
             let defaultValue = DragHandle.auto
             guard let config = self.config else { return defaultValue }

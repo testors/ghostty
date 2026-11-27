@@ -582,6 +582,12 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Reset the window size to the default."),
         }},
 
+        .tile_windows => comptime &.{.{
+            .action = .tile_windows,
+            .title = i18n.N_("Tile Windows"),
+            .description = i18n.N_("Arrange the windows on this screen in a grid that fills it."),
+        }},
+
         .inspector => comptime &.{.{
             .action = .{ .inspector = .toggle },
             .title = i18n.N_("Toggle Inspector"),

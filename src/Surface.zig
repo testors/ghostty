@@ -5114,6 +5114,13 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
                 {},
             ),
 
+            // Tiling from a surface tiles the screen showing it.
+            .tile_windows => return try self.rt_app.performAction(
+                .{ .surface = self },
+                .tile_windows,
+                {},
+            ),
+
             else => try self.app.performAction(
                 self.rt_app,
                 action.scoped(.app).?,

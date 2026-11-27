@@ -63,6 +63,7 @@ class AppDelegate: NSObject,
     @IBOutlet private var menuSelectSplitLeft: NSMenuItem?
     @IBOutlet private var menuSelectSplitRight: NSMenuItem?
     @IBOutlet private var menuReturnToDefaultSize: NSMenuItem?
+    @IBOutlet private var menuTileWindows: NSMenuItem?
     @IBOutlet private var menuFloatOnTop: NSMenuItem?
     @IBOutlet private var menuUseAsDefault: NSMenuItem?
     @IBOutlet private var menuSetAsDefaultTerminal: NSMenuItem?
@@ -1033,6 +1034,27 @@ class AppDelegate: NSObject,
         AboutController.shared.hide()
     }
 
+    @IBAction func tileWindows(_ sender: Any?) {
+        tileWindows(on: nil)
+    }
+
+    /// Arranges the terminal windows on `screen` in a grid. Without a
+    /// screen, this uses the screen of the focused window, or of the
+    /// terminal window that was focused last.
+    func tileWindows(on screen: NSScreen?) {
+        guard let screen = screen
+                ?? NSApp.keyWindow?.screen
+                ?? TerminalController.preferredParent?.window?.screen
+                ?? NSScreen.main else { return }
+
+        // A global keybind can tile while another app is focused.
+        if !NSApp.isActive {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        TerminalController.tileWindows(on: screen, gap: ghostty.config.windowTileGap)
+    }
+
     @IBAction func showAbout(_ sender: Any?) {
         AboutController.shared.show()
     }
@@ -1205,6 +1227,7 @@ extension AppDelegate {
         self.menuMoveSplitDividerLeft?.setImageIfDesired(systemSymbolName: "arrow.left.to.line")
         self.menuMoveSplitDividerRight?.setImageIfDesired(systemSymbolName: "arrow.right.to.line")
         self.menuFloatOnTop?.setImageIfDesired(systemSymbolName: "square.filled.on.square")
+        self.menuTileWindows?.setImageIfDesired(systemSymbolName: "rectangle.grid.3x2")
         self.menuFindParent?.setImageIfDesired(systemSymbolName: "text.page.badge.magnifyingglass")
     }
 
@@ -1257,6 +1280,7 @@ extension AppDelegate {
         syncMenuShortcut(config, action: "resize_split:left,10", menuItem: self.menuMoveSplitDividerLeft)
         syncMenuShortcut(config, action: "equalize_splits", menuItem: self.menuEqualizeSplits)
         syncMenuShortcut(config, action: "reset_window_size", menuItem: self.menuReturnToDefaultSize)
+        syncMenuShortcut(config, action: "tile_windows", menuItem: self.menuTileWindows)
 
         syncMenuShortcut(config, action: "increase_font_size:1", menuItem: self.menuIncreaseFontSize)
         syncMenuShortcut(config, action: "decrease_font_size:1", menuItem: self.menuDecreaseFontSize)

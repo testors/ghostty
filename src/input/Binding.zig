@@ -697,6 +697,18 @@ pub const Action = union(enum) {
     /// Only implemented on macOS.
     reset_window_size,
 
+    /// Arrange all terminal windows on the screen of the focused window in
+    /// a grid that fills the screen, such as 3 columns by 2 rows for six
+    /// windows on a 16:9 screen. The grid is chosen so that each window
+    /// is about as wide as it is tall. Windows keep their order from top
+    /// left to bottom right, and when the last row has fewer windows they
+    /// are made wider to fill it. Minimized and fullscreen windows are
+    /// left alone, and tabs in one window count as one window. See
+    /// `window-tile-gap` to leave space between the windows.
+    ///
+    /// Only implemented on macOS.
+    tile_windows,
+
     /// Control the visibility of the terminal inspector.
     ///
     /// Valid arguments: `toggle`, `show`, `hide`.
@@ -1395,6 +1407,7 @@ pub const Action = union(enum) {
             .new_window,
             .undo,
             .redo,
+            .tile_windows,
             => .app,
 
             // Obviously surface actions.

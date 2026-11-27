@@ -706,6 +706,9 @@ extension Ghostty {
             case GHOSTTY_ACTION_RESET_WINDOW_SIZE:
                 resetWindowSize(app, target: target)
 
+            case GHOSTTY_ACTION_TILE_WINDOWS:
+                return tileWindows(app, target: target)
+
             case GHOSTTY_ACTION_RESIZE_WINDOW:
                 return resizeWindow(app, target: target, v: action.action.resize_window)
 
@@ -2196,6 +2199,27 @@ extension Ghostty {
 
             default:
                 assertionFailure()
+            }
+        }
+
+        private static func tileWindows(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s) -> Bool {
+            guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return false }
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                appDelegate.tileWindows(on: nil)
+                return true
+
+            case GHOSTTY_TARGET_SURFACE:
+                guard let surface = target.target.surface else { return false }
+                guard let surfaceView = self.surfaceView(from: surface) else { return false }
+                appDelegate.tileWindows(on: surfaceView.window?.screen)
+                return true
+
+            default:
+                assertionFailure()
+                return false
             }
         }
 

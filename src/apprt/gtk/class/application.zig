@@ -827,6 +827,7 @@ pub const Application = extern struct {
             .renderer_health,
             .color_change,
             .reset_window_size,
+            .tile_windows,
             .check_for_updates,
             .undo,
             .redo,

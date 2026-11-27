@@ -2383,6 +2383,13 @@ keybind: Keybinds = .{},
 /// only supported on macOS.
 @"window-step-resize": bool = false,
 
+/// The space in points between windows arranged by the `tile_windows`
+/// keybind action, and between the windows and the edges of the screen.
+/// Set it to 0 to put the windows edge to edge.
+///
+/// Currently only supported on macOS.
+@"window-tile-gap": u32 = 1,
+
 /// The position where new tabs are created. Valid values:
 ///
 ///   * `current` - Insert the new tab after the currently focused tab,
@@ -7360,6 +7367,11 @@ pub const Keybinds = struct {
                 alloc,
                 .{ .key = .{ .unicode = 'w' }, .mods = .{ .super = true, .shift = true } },
                 .{ .close_window = {} },
+            );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 't' }, .mods = .{ .super = true, .ctrl = true } },
+                .{ .tile_windows = {} },
             );
             try self.set.put(
                 alloc,

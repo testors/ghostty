@@ -383,6 +383,11 @@ pub const Action = union(Key) {
     /// path is then opened as a local one.
     open_remote_path: OpenRemotePath,
 
+    /// Arrange the terminal windows on a screen in a grid that fills it.
+    /// With a surface target, the screen is the one showing the surface's
+    /// window. With an app target, the apprt picks the screen.
+    tile_windows,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -459,6 +464,7 @@ pub const Action = union(Key) {
         open_settings,
         remote_session,
         open_remote_path,
+        tile_windows,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
